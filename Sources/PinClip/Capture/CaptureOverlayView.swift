@@ -38,7 +38,7 @@ struct CaptureOverlayView: View {
                     cornerHandles(for: sel)
                 }
 
-                if let hint = state.sizeHint {
+                if state.showBadge, let hint = state.sizeHint {
                     sizeBadge(hint, at: sel)
                 }
 

@@ -37,6 +37,14 @@ struct AppSettings: Codable, Sendable, Equatable {
     var webFaviconEnabled: Bool = true
     /// 截图默认带背景+阴影装饰导出
     var captureDecoration: Bool = false
+    /// 选区尺寸角标（截图时左上角显示 W×H，默认关闭）
+    var showSizeBadge: Bool = false
+    /// 导出水印文字（空 = 不加水印）
+    var watermarkText: String = ""
+    /// 水印位置：topLeft / topRight / bottomLeft / bottomRight
+    var watermarkCorner: String = "bottomRight"
+    /// 水印不透明度 0.2–0.9
+    var watermarkOpacity: Double = 0.55
 }
 
 /// 设置存取（MainActor：设置量小，直接主线程读写）

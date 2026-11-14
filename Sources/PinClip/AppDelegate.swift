@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.historyStore = historyStore
         appState.panelActions = panelController
         pinController.appState = appState
+        overlayController.appState = appState
         overlayController.onResult = { [weak self] result in
             self?.handleCaptureResult(result)
         }
@@ -215,8 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startRegionCapture() {
         guard ensureScreenPermission() else { return }
-        let decorated = appState.settings.captureDecoration
-        Task { await overlayController.beginRegionCapture(decorated: decorated) }
+        Task { await overlayController.beginRegionCapture() }
     }
 
     private func startFullscreenCapture() {

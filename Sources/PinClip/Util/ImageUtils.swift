@@ -83,6 +83,52 @@ enum ImageKit {
         return ctx.makeImage()
     }
 
+    // MARK: 水印
+
+    /// 在截图角落叠加半透明水印文字（带轻微投影保证可读）
+    static func watermarked(_ image: CGImage, text: String, corner: String,
+                            opacity: Double, scale: CGFloat) -> CGImage? {
+        let w = image.width, h = image.height
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let font = NSFont.systemFont(ofSize: 14 * scale, weight: .medium)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
+        shadow.shadowBlurRadius = 2 * scale
+        shadow.shadowOffset = CGSize(width: 0, height: -1 * scale)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white.withAlphaComponent(opacity),
+            .shadow: shadow,
+        ]
+        let attr = NSAttributedString(string: text, attributes: attrs)
+        let textSize = attr.size()
+        let margin = 16 * scale
+
+        let x: CGFloat
+        let yFlipped: CGFloat
+        switch corner {
+        case "topLeft": x = margin; yFlipped = margin
+        case "topRight": x = CGFloat(w) - margin - textSize.width; yFlipped = margin
+        case "bottomLeft": x = margin; yFlipped = CGFloat(h) - margin - textSize.height
+        default: x = CGFloat(w) - margin - textSize.width; yFlipped = CGFloat(h) - margin - textSize.height
+        }
+
+        // 用翻转的 NSGraphicsContext 让 NSAttributedString.draw 以左上原点绘制
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
+        attr.draw(at: NSPoint(x: x, y: yFlipped))
+        NSGraphicsContext.restoreGraphicsState()
+
+        return ctx.makeImage()
+    }
+
     // MARK: 哈希
 
     static func sha256Hex(_ data: Data) -> String {

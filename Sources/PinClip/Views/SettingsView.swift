@@ -202,6 +202,47 @@ struct SettingsView: View {
                     get: { appState.settings.captureDecoration },
                     set: { newValue in appState.updateSettings { $0.captureDecoration = newValue } }
                 ))
+                Toggle("截图时左上角显示尺寸角标", isOn: Binding(
+                    get: { appState.settings.showSizeBadge },
+                    set: { newValue in appState.updateSettings { $0.showSizeBadge = newValue } }
+                ))
+            }
+            card {
+                Toggle("导出截图叠加自定义水印", isOn: Binding(
+                    get: { !appState.settings.watermarkText.isEmpty },
+                    set: { newValue in appState.updateSettings {
+                        $0.watermarkText = newValue ? (appState.settings.watermarkText.isEmpty ? "@我" : appState.settings.watermarkText) : ""
+                    } }
+                ))
+                if !appState.settings.watermarkText.isEmpty {
+                    TextField("水印文字", text: Binding(
+                        get: { appState.settings.watermarkText },
+                        set: { newValue in appState.updateSettings { $0.watermarkText = newValue } }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    Picker("位置", selection: Binding(
+                        get: { appState.settings.watermarkCorner },
+                        set: { newValue in appState.updateSettings { $0.watermarkCorner = newValue } }
+                    )) {
+                        Text("左上").tag("topLeft")
+                        Text("右上").tag("topRight")
+                        Text("左下").tag("bottomLeft")
+                        Text("右下").tag("bottomRight")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                    HStack {
+                        Text("不透明度")
+                        Slider(value: Binding(
+                            get: { appState.settings.watermarkOpacity },
+                            set: { newValue in appState.updateSettings { $0.watermarkOpacity = newValue } }
+                        ), in: 0.2...0.9)
+                    }
+                }
+                Text("水印叠加在复制 / 保存 / 贴图的截图上，跟随深浅色自动加投影")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
         }
     }

@@ -15,6 +15,8 @@ final class OverlayController {
     /// nil = 取消
     var onResult: ((Result?) -> Void)?
 
+    weak var appState: AppState?
+
     private var windows: [OverlayWindow] = []
     private var states: [DisplayCaptureState] = []
     private var keyMonitor: Any?
@@ -24,11 +26,12 @@ final class OverlayController {
 
     // MARK: 启动
 
-    func beginRegionCapture(decorated: Bool = false) async {
+    func beginRegionCapture() async {
         guard !isRunning else { return }
         isRunning = true
         finished = false
 
+        let settings = appState?.settings ?? AppSettings()
         let snaps = SnapWindows.list(excludingPID: ProcessInfo.processInfo.processIdentifier)
         let cursorDisplay = ScreenCapture.displayUnderCursor()
 
@@ -43,7 +46,8 @@ final class OverlayController {
                 snapWindows: snaps,
                 isPrimaryInteraction: displayID == cursorDisplay
             )
-            state.decorated = decorated
+            state.decorated = settings.captureDecoration
+            state.showBadge = settings.showSizeBadge
             states.append(state)
         }
         guard !states.isEmpty else {
@@ -143,6 +147,16 @@ final class OverlayController {
         if state.decorated {
             let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == NSAppearance.Name("darkAqua")
             finalImage = ImageKit.decorated(image, scale: state.scale, dark: dark) ?? image
+        }
+        // 自定义水印（设置 → 通用）
+        if let wmText = appState?.settings.watermarkText, !wmText.isEmpty {
+            finalImage = ImageKit.watermarked(
+                finalImage,
+                text: wmText,
+                corner: appState?.settings.watermarkCorner ?? "bottomRight",
+                opacity: appState?.settings.watermarkOpacity ?? 0.55,
+                scale: state.scale
+            ) ?? finalImage
         }
         let rect = state.selectionGlobalRect ?? .zero
         finish()

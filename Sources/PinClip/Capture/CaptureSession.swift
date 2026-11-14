@@ -97,6 +97,8 @@ final class DisplayCaptureState {
     var exportFlash: Bool = false
     /// 导出时是否包背景+阴影装饰（CleanShot 式，工具条可切换）
     var decorated: Bool = false
+    /// 选区尺寸角标（左上角 W×H，跟随设置，默认关）
+    var showBadge: Bool = false
 
     init(displayID: CGDirectDisplayID, screen: NSScreen, bgImage: CGImage, scale: CGFloat,
          snapWindows: [SnapWindow], isPrimaryInteraction: Bool) {
