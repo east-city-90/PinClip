@@ -17,6 +17,10 @@ final class PanelVM {
     var observerTokens: [NSObjectProtocol] = []
     /// 右侧详情当前条目的来源图标（App 图标 / favicon，异步加载）
     var detailIcon: NSImage?
+    /// 右侧详情大图（ImageIO 降采样，后台解码）
+    var detailImage: NSImage?
+    /// 列表行缩略图缓存（path → 24px 图，后台解码）
+    var thumbImages: [String: NSImage] = [:]
     /// 文本详情的转换结果（工具行处理后的文本；nil = 未转换）
     var detailTransformed: String?
     /// 当前应用的转换名（用于工具行高亮）
@@ -233,7 +237,7 @@ struct HistoryPanelView: View {
                 .fill(selected ? Theme.accent : Color.clear)
                 .frame(width: 2, height: 22)
             if item.kind == .image || item.kind == .screenshot {
-                rowLeading(for: item)
+                rowLeading(for: item, thumb: item.thumbPath.flatMap { vm.thumbImages[$0] })
             }
             previewLine(for: item)
                 .font(.system(size: 12))
@@ -252,19 +256,23 @@ struct HistoryPanelView: View {
                 .fill(selected ? Theme.cardFillHover : Color.clear)
         )
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            actions.activate(item, paste: appState.settings.autoPaste)
+        .task(id: item.id) {
+            // 缩略图后台解码（64px ImageIO 降采样 + NSCache），行渲染零解码
+            if let path = item.thumbPath, vm.thumbImages[path] == nil {
+                vm.thumbImages[path] = await ImageCache.loadThumb(path: path)
+            }
         }
+        // 注意：行上不要挂双击手势——单击/双击歧义识别会让每次点击延迟约 350ms（用户感知"非常卡"）
         .onTapGesture {
             vm.selectedID = item.id
         }
         .contextMenu { contextActions(for: item) }
     }
 
-    /// 图片行的真实缩略图（文字/文件行不显示图标）
+    /// 图片行的真实缩略图（后台解码缓存；文字/文件行不显示图标）
     @ViewBuilder
-    private func rowLeading(for item: ClipItem) -> some View {
-        if let thumb = item.thumbPath.flatMap({ NSImage(byReferencingFile: $0) }) {
+    private func rowLeading(for item: ClipItem, thumb: NSImage?) -> some View {
+        if let thumb {
             Image(nsImage: thumb)
                 .resizable()
                 .scaledToFill()
@@ -272,7 +280,8 @@ struct HistoryPanelView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5))
         } else {
-            KindIcon(kind: item.kind)
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color.primary.opacity(0.06))
                 .frame(width: 24, height: 24)
         }
     }
@@ -323,7 +332,6 @@ struct HistoryPanelView: View {
             Text("⏎ 粘贴").keyStyle()
             Text("⌘⏎ 复制").keyStyle()
             Text("⌫ 删除").keyStyle()
-            Text("双击粘贴").keyStyle()
             Spacer()
             Text("⌘1-9 置顶粘贴").keyStyle()
         }
@@ -429,6 +437,11 @@ struct DetailPane: View {
                     vm.detailIcon = nil
                     vm.detailTransformed = nil
                     vm.detailTransformKey = nil
+                    vm.detailImage = nil
+                    // 大图优先（降采样后台解码），再补来源图标
+                    if item.kind == .image || item.kind == .screenshot, let path = item.mediaPath {
+                        vm.detailImage = await ImageCache.loadDetail(path: path)
+                    }
                     vm.detailIcon = await FaviconService.icon(
                         for: item,
                         allowNetwork: appState.settings.webFaviconEnabled
@@ -530,15 +543,23 @@ struct DetailPane: View {
         }
     }
 
-    /// 图片：撑满可用空间的大图预览
+    /// 图片：撑满可用空间的大图预览（后台降采样解码，加载中显示占位）
     @ViewBuilder
     private func imageContent(for item: ClipItem) -> some View {
-        if let path = item.mediaPath, let image = NSImage(byReferencingFile: path) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(12)
+        if let path = item.mediaPath {
+            if let image = vm.detailImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(12)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.primary.opacity(0.05))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(ProgressView())
+                    .padding(12)
+            }
         } else {
             Image(systemName: "photo")
                 .font(.system(size: 40))

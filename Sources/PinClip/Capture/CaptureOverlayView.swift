@@ -55,12 +55,8 @@ struct CaptureOverlayView: View {
         .frame(width: state.bgPointSize.width, height: state.bgPointSize.height)
         .contentShape(Rectangle())
         .gesture(captureGesture)
-        .onTapGesture(count: 2) {
-            // 微信式：编辑态且未选工具时，双击选区 = 完成（复制）
-            if state.phase == .editing, state.tool == .none, state.textDraft == nil {
-                controller.finalize(action: .copy)
-            }
-        }
+        // 注意：不要在此处加 onTapGesture——与 minimumDistance:0 的拖拽手势产生识别竞争，
+        // 会吞掉第一次拖拽（曾导致"第一次画选区不生效"）
         .onContinuousHover { phase in
             if case .active(let location) = phase, state.phase == .picking {
                 state.hoverSnap = topSnapWindow(containing: location)

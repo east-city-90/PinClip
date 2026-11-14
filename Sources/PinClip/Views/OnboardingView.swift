@@ -82,6 +82,19 @@ struct OnboardingView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { appState.refreshPermissions() }
+        .task {
+            // 授权状态轮询：用户在系统设置授权后，状态点实时变绿并自动收起引导
+            while true {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                appState.refreshPermissions()
+                if appState.screenPermission {
+                    // 看到绿色状态短暂停留后自动收起（无需手动点「开始使用」）
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                    actions.dismissOnboarding()
+                    break
+                }
+            }
+        }
     }
 
     private var statusRows: some View {
