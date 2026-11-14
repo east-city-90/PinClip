@@ -240,4 +240,15 @@ final class OverlayController {
 /// 无边框窗口需要显式声明可成为 key window（接收键盘）
 final class OverlayWindow: NSWindow {
     override var canBecomeKey: Bool { true }
+
+    /// 关键修复：遮罩弹出后用户首次按下鼠标时窗口可能尚未 key，
+    /// 该次按下只会「激活窗口」而不投递给视图——SwiftUI 拖拽收不到（表现为第一次拖拽不生效）。
+    /// 在事件分发前先 key 化，保证首次按下即生效。
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !isKeyWindow {
+            NSLog("PinClip.overlay: 首次按下，key 化窗口")
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
 }
