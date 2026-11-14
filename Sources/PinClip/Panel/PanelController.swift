@@ -6,6 +6,8 @@ import SwiftUI
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate, PanelActions {
     private let panel: PanelPanel
+    /// 失焦收起的抑制开关：showPanel 内部的 orderOut 会触发一次 resignKey，不能被当成用户点走
+    private var resignSuppress = false
     private let settingsStore: SettingsStore
     private let panelVM: PanelVM
     private weak var appState: AppState?
@@ -56,12 +58,14 @@ final class PanelController: NSObject, NSWindowDelegate, PanelActions {
     func showPanel() {
         NSLog("PinClip.panel: showPanel visibleBefore=\(panel.isVisible)")
         appState?.refreshPermissions()
+        resignSuppress = true
         // 先隐藏再定位：显示模式重排后，服务端合成位置可能与 NSWindow 坐标脱节（0.9 倍缩放残留），
         // 相同 frame 的 setFrame 会被当 no-op 跳过；orderOut 强制下一次显示采用新 frame
         panel.orderOut(nil)
         positionNearCursor()
         panel.makeKeyAndOrderFront(nil)
         positionNearCursor()
+        resignSuppress = false
         NotificationCenter.default.post(name: .pinclipPanelShown, object: nil)
     }
 
@@ -91,9 +95,11 @@ final class PanelController: NSObject, NSWindowDelegate, PanelActions {
     // MARK: 失焦自动收起（弹层语义）
 
     nonisolated func windowDidResignKey(_ notification: Notification) {
+        let suppressed = MainActor.assumeIsolated { resignSuppress }
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
-                self?.hidePanel()
+                guard let self, !suppressed else { return }
+                self.hidePanel()
             }
         }
     }
