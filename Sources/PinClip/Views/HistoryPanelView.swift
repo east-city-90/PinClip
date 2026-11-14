@@ -174,15 +174,6 @@ struct HistoryPanelView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 190)
-
-            AppIconButton(systemName: appState.paused ? "play.fill" : "pause.fill",
-                          active: appState.paused,
-                          helpText: appState.paused ? "恢复记录" : "暂停记录") {
-                appState.updateSettings { $0.paused.toggle() }
-            }
-            AppIconButton(systemName: "gearshape", helpText: "设置") {
-                actions.openSettings()
-            }
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
@@ -233,31 +224,26 @@ struct HistoryPanelView: View {
         vm.items.first.map { Theme.groupLabel(for: $0.createdAt) } ?? "今天"
     }
 
-    /// 紧凑摘要行：图片行带缩略图，文字/文件行纯文本（低行高）
+    /// 紧凑摘要行：单行显示（预览 + 右侧时间），图片行带小缩略图
     @ViewBuilder
     private func compactRow(for item: ClipItem) -> some View {
         let selected = vm.selectedID == item.id
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1)
                 .fill(selected ? Theme.accent : Color.clear)
-                .frame(width: 2, height: 26)
+                .frame(width: 2, height: 22)
             if item.kind == .image || item.kind == .screenshot {
                 rowLeading(for: item)
             }
-            VStack(alignment: .leading, spacing: 1) {
-                previewLine(for: item)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                HStack(spacing: 4) {
-                    if item.pinned { PinBadge() }
-                    Text(Theme.timeString(item.createdAt))
-                    Text(Theme.sizeDescription(item))
-                }
+            previewLine(for: item)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            if item.pinned { PinBadge() }
+            Text(Theme.timeString(item.createdAt))
                 .font(.system(size: 10))
                 .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-            }
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
@@ -282,12 +268,12 @@ struct HistoryPanelView: View {
             Image(nsImage: thumb)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 30, height: 30)
+                .frame(width: 24, height: 24)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5))
         } else {
             KindIcon(kind: item.kind)
-                .frame(width: 30, height: 30)
+                .frame(width: 24, height: 24)
         }
     }
 
