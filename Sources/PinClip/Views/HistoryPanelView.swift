@@ -26,8 +26,8 @@ final class PanelVM {
     var detailTransformed: String?
     /// 当前应用的转换名（用于工具行高亮）
     var detailTransformKey: String?
-    /// Apple 翻译会话配置（macOS 15+；类型擦除存储，触发 translationTask）
-    var translationConfigAny: Any?
+    /// Apple 翻译弹窗展示开关（macOS 15+，系统全权处理语言检测/确认/下载）
+    var presentTranslation = false
 
     weak var store: HistoryStore?
     weak var appState: AppState?
@@ -91,27 +91,6 @@ final class PanelVM {
         toastClearTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             if self?.toast == text { self?.toast = nil }
-        }
-    }
-
-    /// Apple 翻译会话（由 DetailPane 的 translationTask 驱动）
-    /// 译文按现有转换管线写入 detailTransformed：就地显示 + 自动复制，还原可回原文
-    @available(macOS 15.0, *)
-    @MainActor
-    func runTranslation(session: TranslationSession, item: ClipItem, appState: AppState) async {
-        let source = detailTransformed ?? item.textContent ?? ""
-        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        do {
-            let response = try await session.translate(source)
-            let translated = response.targetText
-            guard !translated.isEmpty else { return }
-            detailTransformed = translated
-            detailTransformKey = "translation"
-            ClipboardWriter.writeText(translated)
-            showToast("已翻译并复制结果")
-        } catch {
-            translationConfigAny = nil
-            appState.showToast("翻译失败：\(error.localizedDescription)")
         }
     }
 }
@@ -462,7 +441,6 @@ struct DetailPane: View {
                     vm.detailTransformed = nil
                     vm.detailTransformKey = nil
                     vm.detailImage = nil
-                    vm.translationConfigAny = nil
                     // 大图优先（降采样后台解码），再补来源图标
                     if item.kind == .image || item.kind == .screenshot, let path = item.mediaPath {
                         vm.detailImage = await ImageCache.loadDetail(path: path)
@@ -472,7 +450,13 @@ struct DetailPane: View {
                         allowNetwork: appState.settings.webFaviconEnabled
                     )
                 }
-                .modifier(TranslationTaskModifier(item: item, vm: vm, appState: appState))
+                .modifier(TranslationPresentationModifier(
+                    isPresented: Binding(
+                        get: { vm.presentTranslation },
+                        set: { vm.presentTranslation = $0 }
+                    ),
+                    text: vm.detailTransformed ?? item.textContent ?? ""
+                ))
             } else {
                 emptyDetail
             }
@@ -658,14 +642,15 @@ struct DetailPane: View {
         var result: String?
         switch key {
         case "translation":
-            // Apple 系统翻译：新 Configuration 触发 translationTask 会话（自动语言检测，必要时系统弹语言选择）
+            // Apple 系统翻译：智能目标语言
+            // 文本含中文 → 译英文（中英互译主场景）；纯西文 → 译系统首选语言
             guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15 else {
                 appState.showToast("翻译需要 macOS 15 及以上版本")
                 return
             }
             if #available(macOS 15.0, *) {
-                vm.translationConfigAny = TranslationSession.Configuration()
-                vm.showToast("正在翻译…")
+                // 系统翻译弹窗：语言检测/确认/资源下载全部由系统处理（无边框面板上 sheet 不可用）
+                vm.presentTranslation = true
             }
             return
         case "newlines":
@@ -803,23 +788,14 @@ private extension Text {
     }
 }
 
-/// Apple 翻译会话挂载：macOS 15+；点「翻译」按钮写入新 Configuration 触发会话
-/// （源语言自动检测，语言对未安装/歧义时系统自动弹语言选择）
-@MainActor
-struct TranslationTaskModifier: ViewModifier {
-    let item: ClipItem
-    let vm: PanelVM
-    let appState: AppState
+/// Apple 翻译弹窗（macOS 14.4+ 可用性门控；语言检测/确认/下载全部由系统处理）
+struct TranslationPresentationModifier: ViewModifier {
+    let isPresented: Binding<Bool>
+    let text: String
 
     func body(content: Content) -> some View {
-        if #available(macOS 15.0, *) {
-            if let cfg = vm.translationConfigAny as? TranslationSession.Configuration {
-                content.translationTask(cfg) { session in
-                    await vm.runTranslation(session: session, item: item, appState: appState)
-                }
-            } else {
-                content
-            }
+        if #available(macOS 14.4, *) {
+            content.translationPresentation(isPresented: isPresented, text: text)
         } else {
             content
         }
