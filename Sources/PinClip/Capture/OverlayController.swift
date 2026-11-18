@@ -94,6 +94,9 @@ final class OverlayController {
             }
             windows.append(win)
         }
+        // 关键：遮罩属于非激活应用时，首次按下会被系统当作「激活应用」吞掉（首按不投递），
+        // 必须显式激活本应用，保证首次拖拽直接生效
+        NSApp.activate(ignoringOtherApps: true)
         installKeyMonitor()
         startBlindDragWatch()
     }
@@ -297,9 +300,9 @@ final class OverlayWindow: NSWindow {
     /// 该次按下只会「激活窗口」而不投递给视图——SwiftUI 拖拽收不到（表现为第一次拖拽不生效）。
     /// 在事件分发前先 key 化，保证首次按下即生效。
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown, !isKeyWindow {
-            NSLog("PinClip.overlay: 首次按下，key 化窗口")
-            makeKey()
+        if event.type == .leftMouseDown {
+            NSLog("PinClip.overlay: leftMouseDown isKey=\(isKeyWindow) visible=\(isVisible)")
+            if !isKeyWindow { makeKey() }
         }
         super.sendEvent(event)
     }

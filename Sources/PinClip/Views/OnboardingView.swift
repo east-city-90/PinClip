@@ -15,7 +15,7 @@ struct OnboardingView: View {
                     .font(.system(size: 15, weight: .semibold))
                 Text("PinClip 需要该权限才能截图。\n全程本地处理，不上传任何数据。")
                     .font(.system(size: 12))
-                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
             }
@@ -68,17 +68,17 @@ struct OnboardingView: View {
                             .frame(width: 160, height: 24)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .foregroundStyle(Theme.muted)
                 }
             }
         }
         .padding(.horizontal, 26)
         .padding(.vertical, 24)
         .frame(width: 380)
-        .background(RoundedRectangle(cornerRadius: Theme.popRadius).fill(Theme.cardFill))
+        .background(RoundedRectangle(cornerRadius: Theme.popRadius).fill(Theme.card))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.popRadius)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+                .stroke(Theme.line.opacity(0.6), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { appState.refreshPermissions() }
@@ -117,7 +117,7 @@ struct OnboardingView: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: Theme.cardRadius).fill(Theme.cardFill))
+        .background(RoundedRectangle(cornerRadius: Theme.cardRadius).fill(Theme.card))
         .padding(.horizontal, 4)
     }
 
@@ -131,7 +131,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(name).font(.system(size: 12, weight: .medium))
                 Text(required).font(.system(size: 10))
-                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .foregroundStyle(Theme.muted)
             }
             Spacer()
             if granted {
