@@ -407,6 +407,43 @@ struct HistoryPanelView: View {
 
     private func handleKey(_ event: NSEvent, vm: PanelVM) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // 搜索框聚焦时输入优先：字符/⌫ 透传给输入框；↑↓ 保持列表导航；⏎ 粘贴；Esc 先清空搜索
+        if searchFocused {
+            switch event.keyCode {
+            case 126: // ↑ 列表导航
+                vm.moveSelection(-1); return true
+            case 125: // ↓ 列表导航
+                vm.moveSelection(1); return true
+            case 36, 76: // ⏎ 粘贴选中项
+                if flags.contains(.command) {
+                    if let item = vm.selectedItem { actions.activate(item, paste: false) }
+                } else if let item = vm.selectedItem {
+                    actions.activate(item, paste: appState.settings.autoPaste)
+                }
+                return true
+            case 53: // Esc：有搜索词先清空搜索，无则收起面板
+                if !vm.query.isEmpty {
+                    vm.query = ""
+                    vm.debounceReload()
+                } else {
+                    actions.hidePanel()
+                }
+                return true
+            case 51: // ⌫ 透传：删除输入框中的字符
+                return false
+            default:
+                if flags.contains(.command), !flags.contains(.shift), !flags.contains(.option), !flags.contains(.control),
+                   let ch = event.charactersIgnoringModifiers, let n = Int(ch), n >= 1, n <= 9,
+                   vm.pinned.indices.contains(n - 1) {
+                    actions.activate(vm.pinned[n - 1], paste: appState.settings.autoPaste)
+                    return true
+                }
+                return false // 其余按键（字符等）透传给输入框
+            }
+        }
+
+        // 列表导航模式（搜索框未聚焦）
         switch event.keyCode {
         case 126: // ↑
             vm.moveSelection(-1); return true
