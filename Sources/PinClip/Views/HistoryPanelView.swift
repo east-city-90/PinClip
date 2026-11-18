@@ -48,9 +48,8 @@ final class PanelVM {
         query = ""
         filter = .all
         reload()
-        if selectedID == nil || !orderedItems.contains(where: { $0.id == selectedID }) {
-            selectedID = orderedItems.first?.id
-        }
+        // 唤起时无条件选中最新一条（用户预期：默认选中最新的）
+        selectedID = orderedItems.first?.id
     }
 
     func reload() {
@@ -206,23 +205,37 @@ struct HistoryPanelView: View {
         if vm.orderedItems.isEmpty {
             emptyListState
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    if !vm.pinned.isEmpty {
-                        SectionHeader(title: "★ 置顶")
-                        ForEach(vm.pinned) { item in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        if !vm.pinned.isEmpty {
+                            SectionHeader(title: "★ 置顶")
+                                .id("list-top")
+                            ForEach(vm.pinned) { item in
+                                compactRow(for: item)
+                            }
+                        } else {
+                            SectionHeader(title: listSectionTitle)
+                                .id("list-top")
+                        }
+                        ForEach(vm.items) { item in
                             compactRow(for: item)
                         }
                     }
-                    SectionHeader(title: listSectionTitle)
-                    ForEach(vm.items) { item in
-                        compactRow(for: item)
-                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .scrollIndicators(.never)
+                .onReceive(NotificationCenter.default.publisher(for: .pinclipPanelShown)) { _ in
+                    // 唤起时回到列表顶部（最新条目在顶部）
+                    proxy.scrollTo("list-top", anchor: .top)
+                }
+                .onChange(of: vm.selectedID) { _, newID in
+                    // 键盘 ↑↓ 导航时保持选中行可见
+                    guard let id = newID else { return }
+                    proxy.scrollTo(id, anchor: .center)
+                }
             }
-            .scrollIndicators(.never)
         }
     }
 
