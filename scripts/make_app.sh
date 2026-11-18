@@ -50,7 +50,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "▶ ad-hoc codesign"
-codesign --force --sign - "$APP"
+echo "▶ codesign"
+# 稳定签名优先：本地存在受信任的 "PinClip Dev" 证书时使用之（TCC 授权跨构建保留），
+# 否则回退 ad-hoc（每次构建身份变化，需重新授权屏幕录制）
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "PinClip Dev"; then
+    echo "  使用稳定签名身份: PinClip Dev"
+    codesign --force --sign "PinClip Dev" "$APP"
+else
+    echo "  使用 ad-hoc 签名（未检测到 PinClip Dev 证书）"
+    codesign --force --sign - "$APP"
+fi
 
 echo "✅ $APP"
