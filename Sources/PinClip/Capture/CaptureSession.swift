@@ -126,6 +126,8 @@ final class DisplayCaptureState {
             x: min(start.x, point.x), y: min(start.y, point.y),
             width: abs(point.x - start.x), height: abs(point.y - start.y)
         )
+        // 实际拖动超过 4px 才清除吸附高亮（微动点击仍可采纳窗口 → 点击截全图）
+        if let sel = selection, sel.width > 4, sel.height > 4 { hoverSnap = nil }
     }
 
     func endDrag(at point: CGPoint) {
@@ -133,20 +135,20 @@ final class DisplayCaptureState {
         dragStart = nil
         updateDrag(to: point)
 
-        // 微动点击：采纳悬停吸附的窗口框；无吸附则取消选区
+        // 微动点击：命中吸附窗口 → 采纳窗口框为选区（出现工具条，可继续标注）；无吸附则取消选区
         if let sel = selection, sel.width < 8, sel.height < 8 {
             if let snap = hoverSnap {
                 selection = snapRectToLocal(snap.rect)
+                phase = .editing
+                tool = .none
+                return
             } else {
                 selection = nil
                 return
             }
         }
         // 最小选区
-        if let sel = selection, sel.width < 12, sel.height < 12 {
-            selection = nil
-            return
-        }
+        if let sel = selection, sel.width < 12, sel.height < 12 { selection = nil; return }
         phase = .editing
         tool = .none
     }

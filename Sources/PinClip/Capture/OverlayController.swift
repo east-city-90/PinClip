@@ -34,6 +34,11 @@ final class OverlayController {
         let settings = appState?.settings ?? AppSettings()
         let snaps = SnapWindows.list(excludingPID: ProcessInfo.processInfo.processIdentifier)
         let cursorDisplay = ScreenCapture.displayUnderCursor()
+        let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
+        let mouseTL = CGPoint(
+            x: NSEvent.mouseLocation.x,
+            y: primaryMaxY - NSEvent.mouseLocation.y
+        )
 
         // 冻结帧：先截屏再弹遮罩（否则会截到遮罩本身）
         for (screen, displayID) in ScreenCapture.screensWithIDs() {
@@ -48,6 +53,11 @@ final class OverlayController {
             )
             state.decorated = settings.captureDecoration
             state.showBadge = settings.showSizeBadge
+            // 初始吸附：光标所在窗口在弹出瞬间直接高亮（无需先移动鼠标）
+            if displayID == cursorDisplay,
+               let hit = snaps.first(where: { $0.rect.contains(mouseTL) }) {
+                state.hoverSnap = hit
+            }
             states.append(state)
         }
         guard !states.isEmpty else {
@@ -85,6 +95,46 @@ final class OverlayController {
             windows.append(win)
         }
         installKeyMonitor()
+        startBlindDragWatch()
+    }
+
+    // MARK: 盲拖接管（用户在冻结/弹窗期间已按住鼠标拖动：首按下事件丢失的场景）
+
+    private var blindDragTimer: Timer?
+
+    private func startBlindDragWatch() {
+        guard blindDragTimer == nil else { return }
+        blindDragTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                self?.blindDragTick(timer)
+            }
+        }
+    }
+
+    private func blindDragTick(_ timer: Timer) {
+        guard !finished, !states.isEmpty else {
+            timer.invalidate(); blindDragTimer = nil; return
+        }
+        guard let state = states.first(where: { $0.isPrimaryInteraction }) ?? states.first,
+              state.phase == .picking else {
+            timer.invalidate(); blindDragTimer = nil; return
+        }
+        let mouse = NSEvent.mouseLocation
+        guard let cursorScreen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) else { return }
+        let topLeft = ScreenGeometry.screenTopLeft(of: cursorScreen)
+        let point = CGPoint(x: mouse.x - topLeft.x, y: cursorScreen.frame.maxY - mouse.y)
+        let leftDown = (NSEvent.pressedMouseButtons & 1) != 0   // bit0 = 左键（macOS 为 Int 位掩码）
+
+        if leftDown {
+            if state.dragStart == nil {
+                state.beginDrag(at: point)   // 接管进行中的拖拽（初始吸附保留供微动采纳）
+            } else {
+                state.updateDrag(to: point)
+            }
+        } else {
+            state.endDrag(at: point)
+            timer.invalidate(); blindDragTimer = nil
+        }
     }
 
     // MARK: 键盘（Esc 取消 / ⏎ 复制 / ⌘S 保存 / ⌘Z 撤销 / Esc 关闭文字草稿）
@@ -224,6 +274,8 @@ final class OverlayController {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
         }
+        blindDragTimer?.invalidate()
+        blindDragTimer = nil
         if cursorPushed {
             NSCursor.pop()
             cursorPushed = false

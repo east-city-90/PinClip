@@ -58,9 +58,10 @@ struct CaptureOverlayView: View {
         // 注意：不要在此处加 onTapGesture——与 minimumDistance:0 的拖拽手势产生识别竞争，
         // 会吞掉第一次拖拽（曾导致"第一次画选区不生效"）
         .onContinuousHover { phase in
-            if case .active(let location) = phase, state.phase == .picking {
+            // 拖拽进行中不更新吸附（避免覆盖初始/拖拽中的选区逻辑）
+            if case .active(let location) = phase, state.phase == .picking, state.dragStart == nil {
                 state.hoverSnap = topSnapWindow(containing: location)
-            } else if case .ended = phase {
+            } else if case .ended = phase, state.dragStart == nil {
                 state.hoverSnap = nil
             }
         }
@@ -91,7 +92,6 @@ struct CaptureOverlayView: View {
                 case .picking:
                     if state.dragStart == nil {
                         state.beginDrag(at: value.startLocation)
-                        state.hoverSnap = nil
                     }
                     state.updateDrag(to: value.location)
                 case .editing:
