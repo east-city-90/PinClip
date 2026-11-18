@@ -57,6 +57,7 @@ final class PanelVM {
         let page = store.page(query: query, kind: filter)
         pinned = page.pinned
         items = page.items
+        NSLog("PinClip.search: query=「\(query)」 → 置顶\(page.pinned.count)条 + 结果\(page.items.count)条")
         if selectedID == nil || !orderedItems.contains(where: { $0.id == selectedID }) {
             selectedID = orderedItems.first?.id
         }
@@ -72,6 +73,8 @@ final class PanelVM {
         reloadTask?.cancel()
         reloadTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
+            // 注意：try? 会吞掉取消错误，必须显式检查——否则防抖失效（每个按键都触发重载）
+            guard !Task.isCancelled else { return }
             self?.reload()
         }
     }
@@ -160,6 +163,7 @@ struct HistoryPanelView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .focused($searchFocused)
+                .onSubmit { vm.reload() }
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
