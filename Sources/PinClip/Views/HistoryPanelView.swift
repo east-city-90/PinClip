@@ -265,9 +265,13 @@ struct HistoryPanelView: View {
                 vm.thumbImages[path] = await ImageCache.loadThumb(path: path)
             }
         }
-        // 注意：行上不要挂双击手势——单击/双击歧义识别会让每次点击延迟约 350ms（用户感知"非常卡"）
+        // 点已选中的行 = 直接粘贴；点未选中的行 = 选中查看详情（再点一次或回车即粘贴）
         .onTapGesture {
-            vm.selectedID = item.id
+            if vm.selectedID == item.id {
+                actions.activate(item, paste: appState.settings.autoPaste)
+            } else {
+                vm.selectedID = item.id
+            }
         }
         .contextMenu { contextActions(for: item) }
     }
@@ -333,6 +337,7 @@ struct HistoryPanelView: View {
         HStack(spacing: 10) {
             Text("↑↓ 选择").keyStyle()
             Text("⏎ 粘贴").keyStyle()
+            Text("双击粘贴").keyStyle()
             Text("⌘⏎ 复制").keyStyle()
             Text("⌫ 删除").keyStyle()
             Spacer()
