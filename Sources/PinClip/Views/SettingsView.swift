@@ -55,7 +55,7 @@ struct SettingsView: View {
             ZStack {
                 Text("设置 · PinClip 贴剪")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
             .frame(height: 28)
             .frame(maxWidth: .infinity)
@@ -63,15 +63,15 @@ struct SettingsView: View {
             HStack(spacing: 0) {
                 sidebar
                     .frame(width: 158)
-                    .background(Theme.bg)
-                Divider().overlay(Theme.line)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                Divider().overlay(Color(nsColor: .separatorColor))
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(Theme.bg)
+                    .background(Color(nsColor: .windowBackgroundColor))
             }
         }
         .frame(width: 720, height: 548)
-        .tint(Theme.accent)
+        .tint(Color.accentColor)
         .onAppear {
             vm.autostart = appState.launchManager?.isEnabled ?? false
             vm.excludedText = appState.settings.excludedBundles.joined(separator: "\n")
@@ -128,10 +128,10 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(selected ? Theme.accent : Theme.muted)
+                .foregroundStyle(selected ? Color.accentColor : Color(nsColor: .secondaryLabelColor))
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(selected ? Theme.accent.opacity(0.14) : Color.clear)
+                        .fill(selected ? Color.accentColor.opacity(0.14) : Color.clear)
                 )
                 .padding(.horizontal, 8)
             }
@@ -170,7 +170,7 @@ struct SettingsView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(Theme.line2, lineWidth: 0.5)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5)
             )
     }
 
@@ -193,7 +193,7 @@ struct SettingsView: View {
                 ))
                 Text("仅对打包后的 PinClip.app 生效")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
             card {
                 HStack {
@@ -201,7 +201,7 @@ struct SettingsView: View {
                     Spacer()
                     Text((appState.settings.saveDir as NSString).expandingTildeInPath)
                         .font(.system(size: 11))
-                        .foregroundStyle(Theme.muted)
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     Button("在访达中打开") { appState.openSaveFolder() }
                         .font(.system(size: 11))
                         .buttonStyle(.link)
@@ -250,7 +250,7 @@ struct SettingsView: View {
                 }
                 Text("水印叠加在复制 / 保存 / 贴图的截图上，跟随深浅色自动加投影")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
         }
     }
@@ -263,7 +263,7 @@ struct SettingsView: View {
             card {
                 Text("与其他应用冲突时 PinClip 会自动尝试备选键；点击「录制」可自定义。")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 ForEach(HotkeyAction.allCases, id: \.self) { action in
                     HStack {
                         Text(action.displayName).font(.system(size: 13))
@@ -271,13 +271,13 @@ struct SettingsView: View {
                         if vm.recordingAction == action {
                             Text("按下新快捷键…（Esc 取消）")
                                 .font(.system(size: 12))
-                                .foregroundStyle(Theme.accent)
+                                .foregroundStyle(Color.accentColor)
                         } else {
                             Text(appState.settings.hotkeys[action]?.display ?? "未设置")
                                 .font(.system(size: 12, weight: .medium).monospaced())
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
-                                .background(Theme.pill, in: RoundedRectangle(cornerRadius: 6))
+                                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                             Button("录制") { startRecording(action) }
                                 .font(.system(size: 11))
                                 .buttonStyle(.bordered)
@@ -328,7 +328,7 @@ struct SettingsView: View {
                 }
                 Text("置顶（收藏）条目不受清理影响")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
             card {
                 HStack(spacing: 12) {
@@ -357,7 +357,7 @@ struct SettingsView: View {
                         .frame(width: 7, height: 7)
                     Text(appState.axPermission ? "辅助功能权限已授予（自动粘贴可用）" : "需要辅助功能权限才能自动粘贴，未授权时自动降级为仅复制")
                         .font(.system(size: 11))
-                        .foregroundStyle(Theme.muted)
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     if !appState.axPermission {
                         Button("打开系统设置") { appState.openAXPermissionSettings() }
                             .font(.system(size: 11))
@@ -378,7 +378,7 @@ struct SettingsView: View {
             card {
                 Text("以下来源应用不会被记录（bundle id，每行一个）：")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 TextEditor(text: Binding(
                     get: { vm.excludedText },
                     set: { vm.excludedText = $0 }
@@ -387,7 +387,7 @@ struct SettingsView: View {
                 .frame(height: 100)
                 .scrollContentBackground(.hidden)
                 .padding(6)
-                .background(Theme.pill, in: RoundedRectangle(cornerRadius: 8))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                 .onDisappear { syncExcludedBundles() }
             }
         }
@@ -412,17 +412,17 @@ struct SettingsView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "pin.circle.fill")
                         .font(.system(size: 38))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Color.accentColor)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("PinClip 贴剪").font(.system(size: 15, weight: .semibold))
                         Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0-dev")")
                             .font(.system(size: 11))
-                            .foregroundStyle(Theme.muted)
+                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     }
                 }
                 Text("截图 + 贴图 + 剪贴板历史，三合一轻量工具。全本地处理，无遥测。")
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
         }
     }

@@ -9,9 +9,9 @@ struct KindIcon: View {
     var body: some View {
         Image(systemName: Theme.kindSymbol(kind))
             .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(Theme.ctlFg)
+            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             .frame(width: 20, height: 20)
-            .background(Theme.pill, in: RoundedRectangle(cornerRadius: 5))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
     }
 }
 
@@ -29,10 +29,10 @@ struct SourceIconView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 4))
         } else {
             ZStack {
-                Circle().fill(Theme.accentSoft)
+                Circle().fill(Color.accentColor.opacity(0.12))
                 Text((fallbackText ?? "?").prefix(1))
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Color.accentColor)
             }
             .frame(width: 16, height: 16)
         }
@@ -65,7 +65,7 @@ struct MagpieSegmented: View {
                         .frame(height: 24)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(on ? Theme.fg : Theme.ctlFg)
+                .foregroundStyle(on ? Color.primary : Color(nsColor: .secondaryLabelColor))
                 .background(
                     Group {
                         if on {
@@ -94,7 +94,7 @@ struct ToastView: View {
             .background(
                 ZStack {
                     Rectangle().fill(.ultraThinMaterial)
-                    Theme.popTint
+                    Color.clear
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 11))
             )
@@ -109,7 +109,7 @@ struct PinBadge: View {
     var body: some View {
         Image(systemName: "pin.fill")
             .font(.system(size: 8))
-            .foregroundStyle(Theme.accent)
+            .foregroundStyle(Color.accentColor)
     }
 }
 
@@ -128,7 +128,7 @@ struct SectionHeader: View {
         }
         .font(.system(size: 11, weight: .semibold))
         .tracking(0.5)
-        .foregroundStyle(Theme.muted)
+        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 2)
@@ -152,10 +152,10 @@ struct AppIconButton: View {
                 .frame(width: 26, height: 26)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(active ? Theme.accent : Theme.ctlFg)
+        .foregroundStyle(active ? Color.accentColor : Color(nsColor: .secondaryLabelColor))
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(active ? Theme.accentSoft : (hovering ? Theme.pill : Color.clear))
+                .fill(active ? Color.accentColor.opacity(0.12) : (hovering ? Color.primary.opacity(0.06) : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -171,14 +171,14 @@ struct GlassBackground: View {
     var body: some View {
         ZStack {
             NSVisualEffectViewWrapper()
-            Theme.popTint.opacity(tintOpacity)
+            Color.clear.opacity(tintOpacity)
         }
     }
 
     static func layered() -> some View {
         ZStack {
             GlassBackground()
-            Theme.popTint
+            Color.clear
         }
     }
 }
@@ -206,7 +206,7 @@ extension View {
                 .background(
                     ZStack {
                         Rectangle().fill(.ultraThinMaterial)
-                        Theme.popTint.opacity(0.6)
+                        Color.clear.opacity(0.6)
                     }
                     .clipShape(shape)
                 )
@@ -224,13 +224,37 @@ struct MetaLine: View {
         HStack(spacing: 4) {
             ForEach(texts.indices, id: \.self) { i in
                 if i > 0 {
-                    Text("·").foregroundStyle(Theme.faint)
+                    Text("·").foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 }
                 Text(texts[i])
                     .lineLimit(1)
             }
         }
         .font(.system(size: 11))
-        .foregroundStyle(Theme.muted)
+        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+    }
+}
+
+// MARK: - 系统面板材质（macOS 26+ Liquid Glass；旧系统回退 NSVisualEffectView 毛玻璃）
+
+struct SystemGlassModifier<S: Shape>: ViewModifier {
+    var shape: S
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(in: shape)
+        } else {
+            content
+                .background(
+                    Rectangle().fill(.ultraThinMaterial)
+                )
+                .clipShape(shape)
+        }
+    }
+}
+
+extension View {
+    func systemGlass<S: Shape>(in shape: S) -> some View {
+        modifier(SystemGlassModifier(shape: shape))
     }
 }

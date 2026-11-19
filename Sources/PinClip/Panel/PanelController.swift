@@ -169,9 +169,8 @@ struct PanelRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(GlassBackground.layered())
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .tint(Theme.accent)
+        .systemGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .tint(Color.accentColor)
     }
 }
 

@@ -9,13 +9,13 @@ struct OnboardingView: View {
         VStack(spacing: 18) {
             Image(systemName: "camera.viewfinder")
                 .font(.system(size: 44, weight: .light))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Color.accentColor)
             VStack(spacing: 6) {
                 Text("开启屏幕录制权限")
                     .font(.system(size: 15, weight: .semibold))
                 Text("PinClip 需要该权限才能截图。\n全程本地处理，不上传任何数据。")
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
             }
@@ -36,7 +36,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
                 } else {
                     Button {
                         appState.openScreenPermissionSettings()
@@ -47,7 +47,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
 
                     Button {
                         Task { await appState.requestScreenPermission() }
@@ -57,7 +57,7 @@ struct OnboardingView: View {
                             .frame(width: 160, height: 26)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Color.accentColor)
 
                     // 剪贴板功能无需屏幕权限，允许先逛
                     Button {
@@ -68,7 +68,7 @@ struct OnboardingView: View {
                             .frame(width: 160, height: 24)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 }
             }
         }
@@ -78,7 +78,7 @@ struct OnboardingView: View {
         .background(RoundedRectangle(cornerRadius: Theme.popRadius).fill(Theme.card))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.popRadius)
-                .stroke(Theme.line.opacity(0.6), lineWidth: 1)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { appState.refreshPermissions() }
@@ -131,7 +131,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(name).font(.system(size: 12, weight: .medium))
                 Text(required).font(.system(size: 10))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
             Spacer()
             if granted {

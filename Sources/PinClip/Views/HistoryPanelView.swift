@@ -109,11 +109,11 @@ struct HistoryPanelView: View {
         VStack(spacing: 0) {
             topBar
             if appState.paused { pausedBanner }
-            Divider().overlay(Theme.line)
+            Divider().overlay(Color(nsColor: .separatorColor))
             HStack(spacing: 0) {
                 masterList
                     .frame(width: 264)
-                Divider().overlay(Theme.line)
+                Divider().overlay(Color(nsColor: .separatorColor))
                 DetailPane(item: vm.selectedItem, appState: appState, actions: actions, vm: vm)
             }
             footerHints
@@ -152,7 +152,7 @@ struct HistoryPanelView: View {
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 10))
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 TextField("搜索剪贴板…", text: Binding(
                     get: { vm.query },
                     set: {
@@ -167,7 +167,7 @@ struct HistoryPanelView: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
-            .background(Theme.pill, in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
 
             // 原生分段控件：自动继承系统最新观感（含 Liquid Glass），tint 靛蓝
             Picker("", selection: Binding(
@@ -195,7 +195,7 @@ struct HistoryPanelView: View {
                 .foregroundStyle(.orange)
             Text("记录已暂停，此期间的复制不会被保存")
                 .font(.system(size: 11))
-                .foregroundStyle(Theme.muted)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 5)
@@ -254,7 +254,7 @@ struct HistoryPanelView: View {
         let selected = vm.selectedID == item.id
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1)
-                .fill(selected ? Theme.accent : Color.clear)
+                .fill(selected ? Color.accentColor : Color.clear)
                 .frame(width: 2, height: 22)
             if item.kind == .image || item.kind == .screenshot {
                 rowLeading(for: item, thumb: item.thumbPath.flatMap { vm.thumbImages[$0] })
@@ -267,13 +267,13 @@ struct HistoryPanelView: View {
             if item.pinned { PinBadge() }
             Text(Theme.timeString(item.createdAt))
                 .font(.system(size: 10))
-                .foregroundStyle(Theme.muted)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(selected ? Theme.sel : Color.clear)
+                .fill(selected ? Color.accentColor.opacity(0.12) : Color.clear)
         )
         .contentShape(Rectangle())
         .task(id: item.id) {
@@ -302,10 +302,10 @@ struct HistoryPanelView: View {
                 .scaledToFill()
                 .frame(width: 24, height: 24)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.line.opacity(0.5), lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5))
         } else {
             RoundedRectangle(cornerRadius: 5)
-                .fill(Theme.pill)
+                .fill(Color.primary.opacity(0.06))
                 .frame(width: 24, height: 24)
         }
     }
@@ -328,20 +328,20 @@ struct HistoryPanelView: View {
             if vm.query.isEmpty {
                 Image(systemName: "clipboard")
                     .font(.system(size: 30))
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 Text("剪贴板空空如也")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 Text("复制任何内容，或按 ⌥A 截一张图")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
             } else {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 24))
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 Text("没有匹配的记录")
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
             Spacer()
         }
@@ -362,7 +362,7 @@ struct HistoryPanelView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 28)
-        .background(Theme.card2)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     // MARK: 右键菜单
@@ -492,7 +492,7 @@ struct DetailPane: View {
             if let item {
                 VStack(spacing: 0) {
                     content(for: item)          // 详情优先展示
-                    Divider().overlay(Theme.line)
+                    Divider().overlay(Color(nsColor: .separatorColor))
                     footer(for: item)           // 操作按钮 + 元信息
                 }
                 .task(id: item.id) {
@@ -520,7 +520,7 @@ struct DetailPane: View {
                 emptyDetail
             }
         }
-        .background(Theme.bg)
+        .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -584,7 +584,7 @@ struct DetailPane: View {
                 .labelStyle(.titleAndIcon)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : Theme.fg)
+        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : Color.primary)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
@@ -593,7 +593,7 @@ struct DetailPane: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(Theme.line.opacity(0.6), lineWidth: 1)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
         )
         .help(title)
     }
@@ -624,7 +624,7 @@ struct DetailPane: View {
                     .padding(12)
             } else {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Theme.pill)
+                    .fill(Color.primary.opacity(0.06))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(ProgressView())
                     .padding(12)
@@ -632,7 +632,7 @@ struct DetailPane: View {
         } else {
             Image(systemName: "photo")
                 .font(.system(size: 40))
-                .foregroundStyle(Theme.faint)
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -669,10 +669,10 @@ struct DetailPane: View {
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(applied ? Theme.accent : Theme.fg)
+                .foregroundStyle(applied ? Color.accentColor : Color.primary)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(applied ? Theme.accent.opacity(0.14) : Theme.card)
+                        .fill(applied ? Color.accentColor.opacity(0.14) : Theme.card)
                 )
             }
             if vm.detailTransformed != nil {
@@ -686,7 +686,7 @@ struct DetailPane: View {
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Theme.muted)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
             }
             Spacer(minLength: 0)
@@ -801,7 +801,7 @@ struct DetailPane: View {
                         HStack(spacing: 8) {
                             Image(systemName: "doc")
                                 .font(.system(size: 11))
-                                .foregroundStyle(Theme.muted)
+                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                             Text((path as NSString).lastPathComponent)
                                 .font(.system(size: 12))
                                 .lineLimit(1)
@@ -809,7 +809,7 @@ struct DetailPane: View {
                             Spacer()
                             Text("在访达中显示")
                                 .font(.system(size: 10))
-                                .foregroundStyle(Theme.accent)
+                                .foregroundStyle(Color.accentColor)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -819,7 +819,7 @@ struct DetailPane: View {
                 }
                 Text("点击条目在访达中显示文件")
                     .font(.system(size: 10))
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -831,10 +831,10 @@ struct DetailPane: View {
         VStack(spacing: 8) {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 30))
-                .foregroundStyle(Theme.faint)
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
             Text("选择左侧条目查看详情")
                 .font(.system(size: 12))
-                .foregroundStyle(Theme.muted)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -843,7 +843,7 @@ struct DetailPane: View {
 private extension Text {
     func keyStyle() -> some View {
         font(.system(size: 10))
-            .foregroundStyle(Theme.faint)
+            .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
     }
 }
 
