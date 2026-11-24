@@ -24,6 +24,12 @@ final class OverlayController {
     private var cursorPushed = false
     private(set) var isRunning = false
 
+    /// 上次导出的选区（全局左上坐标）——⌘R 复用上次选区
+    private var lastGlobalRect: CGRect?
+
+    // 延时截图 HUD
+    private var hudPanel: NSPanel?
+
     // MARK: 启动
 
     func beginRegionCapture() async {
@@ -68,12 +74,86 @@ final class OverlayController {
         presentWindows()
     }
 
+    /// 延时区域截图：倒计时 HUD（可取消），结束后进入常规选区流程
+    func beginDelayedRegionCapture(seconds: Int) {
+        guard !isRunning, hudPanel == nil else { return }
+        let hud = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 84),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false
+        )
+        hud.level = .floating
+        hud.isOpaque = false
+        hud.backgroundColor = .clear
+        hud.hasShadow = true
+        hud.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
+        if let f = screen?.frame {
+            hud.setFrame(CGRect(x: f.midX - 120, y: f.midY - 42, width: 240, height: 84), display: true)
+        }
+        hud.contentView = NSHostingView(rootView: DelayHUDView(
+            seconds: max(1, seconds),
+            onFinish: { [weak self] in
+                self?.closeHUD()
+                Task { await self?.beginRegionCapture() }
+            },
+            onCancel: { [weak self] in
+                self?.closeHUD()
+            }
+        ))
+        hud.orderFrontRegardless()
+        hudPanel = hud
+    }
+
+    private func closeHUD() {
+        hudPanel?.orderOut(nil)
+        hudPanel = nil
+    }
+
+    /// 历史图片 → 重新标注：窗口=图片大小（居中光标屏），选区铺满，直接进编辑态
+    func beginAnnotateExisting(_ image: CGImage) {
+        guard !isRunning else { return }
+        isRunning = true
+        finished = false
+
+        let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
+            ?? NSScreen.screens[0]
+        let visible = screen.visibleFrame
+        var size = CGSize(width: CGFloat(image.width) / screen.backingScaleFactor,
+                          height: CGFloat(image.height) / screen.backingScaleFactor)
+        let maxW = visible.width * 0.9, maxH = visible.height * 0.9
+        if size.width > maxW || size.height > maxH {
+            let r = min(maxW / size.width, maxH / size.height)
+            size = CGSize(width: size.width * r, height: size.height * r)
+        }
+        // 显示 scale 使 bgPointSize 恰等于窗口尺寸（view/window/export 三者 1:1 对齐）
+        let displayScale = max(CGFloat(image.width) / max(size.width, 1), 1)
+        let frame = CGRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2,
+                           width: size.width, height: size.height)
+
+        let state = DisplayCaptureState(
+            displayID: ScreenCapture.displayID(of: screen) ?? CGMainDisplayID(),
+            screen: screen,
+            bgImage: image,
+            scale: displayScale,
+            snapWindows: [],
+            isPrimaryInteraction: true,
+            frameOverride: frame
+        )
+        state.selection = CGRect(origin: .zero, size: state.bgPointSize)
+        state.phase = .editing
+        state.showBadge = appState?.settings.showSizeBadge ?? false
+        states = [state]
+        presentWindows()
+    }
+
     private func presentWindows() {
         NSCursor.crosshair.push()
         cursorPushed = true
         for state in states {
             let win = OverlayWindow(
-                contentRect: state.screen.frame,
+                contentRect: state.frameOverride ?? state.screen.frame,
                 styleMask: .borderless,
                 backing: .buffered,
                 defer: false,
@@ -94,7 +174,7 @@ final class OverlayController {
             }
             windows.append(win)
         }
-        // 关键：遮罩属于非激活应用时，首次按下会被系统当作「激活应用」吞掉（首按不投递），
+        // 关键：遮罩属于非激活应用时，首次按下会被系统当作「激活应用」吞掉（首按下不投递），
         // 必须显式激活本应用，保证首次拖拽直接生效
         NSApp.activate(ignoringOtherApps: true)
         installKeyMonitor()
@@ -132,7 +212,7 @@ final class OverlayController {
             if state.dragStart == nil {
                 state.beginDrag(at: point)   // 接管进行中的拖拽（初始吸附保留供微动采纳）
             } else {
-                state.updateDrag(to: point)
+                state.updateDrag(to: point, square: NSEvent.modifierFlags.contains(.shift))
             }
         } else {
             state.endDrag(at: point)
@@ -140,7 +220,7 @@ final class OverlayController {
         }
     }
 
-    // MARK: 键盘（Esc 取消 / ⏎ 复制 / ⌘S 保存 / ⌘Z 撤销 / Esc 关闭文字草稿）
+    // MARK: 键盘（Esc 取消 / ⏎ 复制 / ⌘S 保存 / ⌘Z 撤销 / ⌘R 复用上次选区 / Esc 关闭文字草稿）
 
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -173,6 +253,9 @@ final class OverlayController {
                     case "s":
                         self.finalize(action: .save)
                         return nil
+                    case "r":
+                        self.reuseLastSelection()
+                        return nil
                     default:
                         break
                     }
@@ -180,6 +263,21 @@ final class OverlayController {
                 return event
             }
         }
+    }
+
+    /// ⌘R：把上次导出的选区贴回当前屏（相交部分），直接进入编辑态
+    private func reuseLastSelection() {
+        guard let last = lastGlobalRect else { return }
+        let state = states.first(where: { $0.isPrimaryInteraction }) ?? states.first
+        guard let state, state.phase == .picking else { return }
+        let tl = ScreenGeometry.screenTopLeft(of: state.screen)
+        let local = CGRect(x: last.minX - tl.x, y: last.minY - tl.y,
+                           width: last.width, height: last.height)
+        let clipped = local.intersection(CGRect(origin: .zero, size: state.bgPointSize))
+        guard !clipped.isEmpty, clipped.width >= 12, clipped.height >= 12 else { return }
+        state.selection = clipped
+        state.phase = .editing
+        state.tool = .none
     }
 
     private func commitDraftIfAny(_ state: DisplayCaptureState) {
@@ -212,6 +310,7 @@ final class OverlayController {
             ) ?? finalImage
         }
         let rect = state.selectionGlobalRect ?? .zero
+        lastGlobalRect = rect
         finish()
         onResult?(Result(image: finalImage, globalRect: rect, displayID: state.displayID, action: action))
     }
@@ -273,6 +372,7 @@ final class OverlayController {
     private func finish() {
         finished = true
         isRunning = false
+        closeHUD()
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
@@ -292,6 +392,47 @@ final class OverlayController {
     }
 }
 
+/// 延时截图倒计时 HUD
+private struct DelayHUDView: View {
+    let seconds: Int
+    let onFinish: () -> Void
+    let onCancel: () -> Void
+    @State private var remaining: Int
+
+    init(seconds: Int, onFinish: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.seconds = seconds
+        self.onFinish = onFinish
+        self.onCancel = onCancel
+        _remaining = State(initialValue: seconds)
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Label("\(remaining) 秒后开始截图", systemImage: "timer")
+                .font(.system(size: 13, weight: .medium))
+            Button("取消") { onCancel() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(Color.primary.opacity(0.08), in: Capsule())
+        }
+        .padding(16)
+        .frame(width: 240, height: 84)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.regularMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        .task {
+            while remaining > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                remaining -= 1
+            }
+            onFinish()
+        }
+    }
+}
+
 /// 无边框窗口需要显式声明可成为 key window（接收键盘）
 final class OverlayWindow: NSWindow {
     override var canBecomeKey: Bool { true }
@@ -301,7 +442,6 @@ final class OverlayWindow: NSWindow {
     /// 在事件分发前先 key 化，保证首次按下即生效。
     override func sendEvent(_ event: NSEvent) {
         if event.type == .leftMouseDown {
-            NSLog("PinClip.overlay: leftMouseDown isKey=\(isKeyWindow) visible=\(isVisible)")
             if !isKeyWindow { makeKey() }
         }
         super.sendEvent(event)

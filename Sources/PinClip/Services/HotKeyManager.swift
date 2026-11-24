@@ -53,6 +53,7 @@ final class HotKeyManager {
         for action in HotkeyAction.allCases {
             guard let handler = handlers[action] else { continue }
             let candidates = [specs[action]].compactMap { $0 } + (fallbacks[action] ?? [])
+            guard !candidates.isEmpty else { continue } // 未绑定且无备选（如默认不绑定的延时截图）
             var registered = false
             var lastError: OSStatus = 0
             for candidate in candidates {
@@ -77,12 +78,20 @@ final class HotKeyManager {
         return failures
     }
 
-    /// 重新绑定（设置页）；false = 与其他 App 冲突
+    /// 重新绑定（设置页）；false = 与其他 App 冲突（旧键保持有效，不回滚半途状态）
     @discardableResult
     func rebind(action: HotkeyAction, spec: HotkeySpec) -> Bool {
         guard let handler = handlers[action] else { return false }
+        let oldSpec = specs[action]
         unregister(action: action)
-        return tryRegister(action: action, spec: spec, handler: handler)
+        if tryRegister(action: action, spec: spec, handler: handler) {
+            return true
+        }
+        // 新键冲突：用旧键重新注册回去（此前旧键被注销后未恢复，设置页显示的快捷键实际已失效）
+        if let oldSpec {
+            _ = tryRegister(action: action, spec: oldSpec, handler: handler)
+        }
+        return false
     }
 
     func spec(for action: HotkeyAction) -> HotkeySpec? {

@@ -4,8 +4,18 @@ import ImageIO
 /// 图片解码缓存：列表缩略图 + 详情大图统一走 ImageIO 降采样（后台解码，杜绝主线程卡顿）
 enum ImageCache {
 
-    private static let thumbs = NSCache<NSString, NSImage>()
-    private static let details = NSCache<NSString, NSImage>()
+    private static let thumbs: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 400
+        c.totalCostLimit = 48 * 1024 * 1024
+        return c
+    }()
+    private static let details: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 40
+        c.totalCostLimit = 128 * 1024 * 1024
+        return c
+    }()
     private static let queue = DispatchQueue(label: "pinclip.imagecache", qos: .userInitiated)
 
     static func cachedThumb(_ path: String) -> NSImage? {

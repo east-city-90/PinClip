@@ -7,19 +7,44 @@ import Observation
 final class HistoryStore {
     /// 任意数据变化自增，SwiftUI 面板据此刷新
     public private(set) var revision = 0
+    /// 历史库无法打开，已降级为内存库（本次运行数据不落盘，重启不保留）
+    public private(set) var degraded = false
 
     private let db: Database
     private let ioQueue = DispatchQueue(label: "pinclip.store.io", qos: .userInitiated)
     private var settingsProvider: () -> AppSettings
-    /// 清理孤儿媒体文件用：DB 引用集合与文件系统集合都需主线程读取，ioQueue 执行
     private var retentionTimer: Timer?
 
     init(settingsProvider: @escaping () -> AppSettings) {
         self.settingsProvider = settingsProvider
+        var opened: Database?
         do {
-            db = try Database(url: Paths.dbURL)
+            opened = try Database(url: Paths.dbURL)
         } catch {
-            fatalError("PinClip: 历史库打开失败 \(error)")
+            // 库打不开（损坏/磁盘错误）：把旧库文件整体挪开保留现场，重建新库；
+            // 仍失败则降级内存库——绝不让应用在启动时崩溃循环
+            let fm = FileManager.default
+            let stamp = Int(Date().timeIntervalSince1970)
+            for suffix in ["", "-wal", "-shm"] {
+                let f = Paths.dbURL.path + suffix
+                if fm.fileExists(atPath: f) {
+                    try? fm.moveItem(atPath: f, toPath: f + ".corrupt-\(stamp)")
+                }
+            }
+            do {
+                opened = try Database(url: Paths.dbURL)
+                NSLog("PinClip: 历史库已重建（旧库备份为 .corrupt-\(stamp)）")
+            } catch {
+                NSLog("PinClip: 历史库重建失败 \(error)，降级为内存库")
+                opened = try? Database(url: URL(fileURLWithPath: ":memory:"))
+                degraded = true
+            }
+        }
+        if let opened {
+            db = opened
+        } else {
+            // 内存库都建不出来（进程级异常）才放弃
+            fatalError("PinClip: 无法创建历史库（磁盘不可写？）")
         }
     }
 
@@ -44,18 +69,23 @@ final class HistoryStore {
         )
     }
 
-    /// 图片入库（截图 kind 用 .screenshot）。重活（写原图+缩略图）在 ioQueue。
-    func recordImage(pngData: Data, source: AppSource, kind: ClipKind = .image, sourceURL: String? = nil) {
+    /// 图片入库（截图 kind 用 .screenshot）。原始 png/tiff 进来即可，
+    /// 解码/PNG 编码/落盘/缩略图全部在 ioQueue，主线程零解码。
+    func recordImage(png: Data?, tiff: Data?, source: AppSource, kind: ClipKind = .image, sourceURL: String? = nil) {
         guard kind == .image || kind == .screenshot else { return }
+        guard png != nil || tiff != nil else { return }
         ioQueue.async { [weak self] in
-            let hash = ImageKit.sha256Hex(pngData)
-            let size = ImageKit.pixelSize(of: pngData) ?? (0, 0)
+            guard let payload = ImageKit.canonicalImage(png: png, tiff: tiff) else {
+                NSLog("PinClip: 剪贴板位图解码失败（忽略本次图片记录）")
+                return
+            }
+            let hash = ImageKit.sha256Hex(payload.data)
             let original = Paths.mediaURL(hash: hash, ext: "png")
-            do { try pngData.write(to: original, options: .atomic) } catch {
+            do { try payload.data.write(to: original, options: .atomic) } catch {
                 NSLog("PinClip: 图片写入失败 \(error)")
                 return
             }
-            let thumb = ImageKit.thumbnail(png: pngData, maxDim: 320)
+            let thumb = ImageKit.thumbnail(png: payload.data, maxDim: 320)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if self.bumpIfExists(hash: hash) { return }
@@ -70,7 +100,7 @@ final class HistoryStore {
                         thumb.map { SQLValue.text($0.path) } ?? .null,
                         .text(source.bundleID ?? ""), .text(source.name ?? ""),
                         sourceURL.map { SQLValue.text($0) } ?? .null,
-                        .int(size.width), .int(size.height),
+                        .int(payload.width), .int(payload.height),
                         .double(Date().timeIntervalSince1970),
                     ]
                 )
@@ -99,7 +129,10 @@ final class HistoryStore {
 
     // MARK: - 读取（面板）
 
-    func page(query: String, kind: HistoryFilter, limit: Int = 200) -> HistoryPage {
+    /// 分页读取：pinned 全量 + 未置顶 limit 条（offset 翻页）。hasMore=后面还有更早条目。
+    /// 搜索匹配 text_content / 来源应用名 / 来源 URL——图片条目 text_content 为空，
+    /// 只靠 text_content 会把图片全部排除（v0.1.x 的缺陷）。
+    func page(query: String, kind: HistoryFilter, limit: Int = 200, offset: Int = 0) -> HistoryPage {
         var conditions: [String] = []
         var binds: [SQLValue] = []
         if kind != .all {
@@ -112,32 +145,40 @@ final class HistoryStore {
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "%", with: "\\%")
                 .replacingOccurrences(of: "_", with: "\\_")
-            conditions.append("text_content LIKE ? ESCAPE '\\'")
-            binds.append(.text("%\(escaped)%"))
+            let like = "%\(escaped)%"
+            conditions.append("(text_content LIKE ?1 ESCAPE '\\' OR source_name LIKE ?1 ESCAPE '\\' OR source_url LIKE ?1 ESCAPE '\\')")
+            binds.append(.text(like))
         }
-        func selectSQL(pinnedFlag: Int, withLimit: Bool) -> String {
+        func selectSQL(pinnedFlag: Int, withPaging: Bool) -> (String, [SQLValue]) {
             var all = conditions
             all.append("pinned=\(pinnedFlag)")
             var sql = "SELECT \(Self.columns) FROM items WHERE \(all.joined(separator: " AND ")) ORDER BY created_at DESC"
-            if withLimit { sql += " LIMIT ?" }
-            return sql
+            var b = binds
+            if withPaging {
+                sql += " LIMIT ? OFFSET ?"
+                b.append(.int(limit))
+                b.append(.int(offset))
+            }
+            return (sql, b)
         }
 
         var pinned: [ClipItem] = []
         var items: [ClipItem] = []
+        var hasMore = false
         do {
-            try db.query(selectSQL(pinnedFlag: 1, withLimit: false), binds: binds) { r in
+            let (pinnedSQL, pinnedBinds) = selectSQL(pinnedFlag: 1, withPaging: false)
+            try db.query(pinnedSQL, binds: pinnedBinds) { r in
                 pinned.append(Self.item(from: r))
             }
-            var itemBinds = binds
-            itemBinds.append(.int(limit))
-            try db.query(selectSQL(pinnedFlag: 0, withLimit: true), binds: itemBinds) { r in
+            let (itemSQL, itemBinds) = selectSQL(pinnedFlag: 0, withPaging: true)
+            try db.query(itemSQL, binds: itemBinds) { r in
                 items.append(Self.item(from: r))
             }
+            hasMore = items.count == limit
         } catch {
             NSLog("PinClip: 查询失败 \(error)")
         }
-        return HistoryPage(pinned: pinned, items: items)
+        return HistoryPage(pinned: pinned, items: items, hasMore: hasMore)
     }
 
     private static func item(from r: RowReader) -> ClipItem {
@@ -191,7 +232,7 @@ final class HistoryStore {
         } else {
             try? db.run("DELETE FROM items", binds: [])
         }
-        sweepOrphanMedia(referenced: []) // imagesOnly 时文本项媒体本就为空；全清则目录可整体清空
+        sweepOrphanMedia() // imagesOnly 时文本项媒体本就为空；全清则目录可整体清空
         if imagesOnly {
             for p in paths { try? FileManager.default.removeItem(atPath: p) }
         }
@@ -206,14 +247,6 @@ final class HistoryStore {
         changed()
     }
 
-    func item(id: Int64) -> ClipItem? {
-        var result: ClipItem?
-        try? db.query("SELECT \(Self.columns) FROM items WHERE id=?1", binds: [.int(Int(id))]) { r in
-            result = Self.item(from: r)
-        }
-        return result
-    }
-
     func latestImageItem() -> ClipItem? {
         var result: ClipItem?
         try? db.query("SELECT \(Self.columns) FROM items WHERE kind IN (?1,?2) ORDER BY created_at DESC LIMIT 1", binds: [.text(ClipKind.image.rawValue), .text(ClipKind.screenshot.rawValue)]) { r in
@@ -222,9 +255,17 @@ final class HistoryStore {
         return result
     }
 
+    func latestTextItem() -> ClipItem? {
+        var result: ClipItem?
+        try? db.query("SELECT \(Self.columns) FROM items WHERE kind=?1 ORDER BY created_at DESC LIMIT 1", binds: [.text(ClipKind.text.rawValue)]) { r in
+            result = Self.item(from: r)
+        }
+        return result
+    }
+
     // MARK: - 保留策略
 
-    /// 启动后与每日执行：文本 500 条上限 / 图片 30 天 / 置顶永久 + 孤儿媒体清理
+    /// 启动后立即执行，之后每 6 小时一次：文本上限 / 图片超期 / 孤儿媒体清理
     func startRetentionLoop(settingsProvider: @escaping () -> AppSettings) {
         runRetention()
         retentionTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
@@ -316,10 +357,9 @@ final class HistoryStore {
         return pinned
     }
 
-    /// 清空历史时整体重建 media 目录（文本/文件条目无媒体文件）
-    private func sweepOrphanMedia(referenced: Set<String>) {
+    /// 清空历史时整体重建 media 目录
+    private func sweepOrphanMedia() {
         let fm = FileManager.default
-        _ = referenced
         try? fm.removeItem(at: Paths.mediaDir)
         try? fm.createDirectory(at: Paths.mediaDir, withIntermediateDirectories: true)
     }

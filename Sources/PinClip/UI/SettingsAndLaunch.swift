@@ -30,7 +30,7 @@ final class FramelessWindow: NSWindow {
     override var canBecomeKey: Bool { true }
 }
 
-/// 设置窗口（720×520，magpie 毛玻璃无边框 + 自定义标题栏，SwiftUI SettingsView 承载）
+/// 设置窗口（720×520，原生标题栏 + SwiftUI SettingsView 承载）
 @MainActor
 final class SettingsWindowController {
     private var window: NSWindow?
@@ -47,7 +47,9 @@ final class SettingsWindowController {
             let vm = SettingsVM()
             if let initialSection { vm.section = initialSection }
             settingsVM = vm
-            // 原生 Mac 风格：标准标题栏 + 红绿灯按钮
+            // 原生标题栏：fullSizeContentView 消除系统亮边（曾出现的"白线"），
+            // 标题文字由系统绘制（titleVisibility=.visible）——自绘 28pt 标题条会与
+            // macOS 26+ 的更高标题栏叠加，导致 titlebar 过高（2026-11-25 用户反馈已修）
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
                 styleMask: [.titled, .closable],
@@ -56,10 +58,9 @@ final class SettingsWindowController {
             )
             window.title = "设置 · PinClip 贴剪"
             window.isReleasedWhenClosed = false
-            // 内容延伸至标题栏下方：保留红绿灯按钮，消除系统窗口亮边
             window.styleMask.insert(.fullSizeContentView)
             window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
+            window.titleVisibility = .visible
             window.backgroundColor = NSColor.windowBackgroundColor
             window.contentView = NSHostingView(rootView: SettingsView(appState: appState, vm: vm))
             window.center()

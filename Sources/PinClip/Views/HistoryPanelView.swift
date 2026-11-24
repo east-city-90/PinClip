@@ -2,8 +2,7 @@ import AppKit
 import SwiftUI
 import Translation
 
-/// 面板视图模型：由 PanelController 持有（CLT 环境无 SwiftUI 宏插件，@State 不可用，
-/// 状态统一放 @Observable VM；控件绑定用 Binding(get:set:) 手动构造）
+/// 面板视图模型（@Observable VM 惯例：控件绑定用 Binding(get:set:) 手动构造）
 @MainActor
 @Observable
 final class PanelVM {
@@ -20,14 +19,17 @@ final class PanelVM {
     var detailIcon: NSImage?
     /// 右侧详情大图（ImageIO 降采样，后台解码）
     var detailImage: NSImage?
-    /// 列表行缩略图缓存（path → 24px 图，后台解码）
+    /// 列表行缩略图缓存（path → 64px 图，后台解码）
     var thumbImages: [String: NSImage] = [:]
     /// 文本详情的转换结果（工具行处理后的文本；nil = 未转换）
     var detailTransformed: String?
     /// 当前应用的转换名（用于工具行高亮）
     var detailTransformKey: String?
-    /// Apple 翻译弹窗展示开关（macOS 15+，系统全权处理语言检测/确认/下载）
+    /// Apple 翻译弹窗展示开关（系统全权处理语言检测/确认/下载）
     var presentTranslation = false
+    /// 分页：列表末尾还有更早条目 / 正在加载
+    var hasMore = false
+    var loadingMore = false
 
     weak var store: HistoryStore?
     weak var appState: AppState?
@@ -57,7 +59,8 @@ final class PanelVM {
         let page = store.page(query: query, kind: filter)
         pinned = page.pinned
         items = page.items
-        NSLog("PinClip.search: query=「\(query)」 → 置顶\(page.pinned.count)条 + 结果\(page.items.count)条")
+        hasMore = page.hasMore
+        loadingMore = false
         if selectedID == nil || !orderedItems.contains(where: { $0.id == selectedID }) {
             selectedID = orderedItems.first?.id
         }
@@ -67,6 +70,16 @@ final class PanelVM {
         let keep = selectedID
         reload()
         selectedID = keep
+    }
+
+    /// 滚动到底部时增量加载更早条目
+    func loadMore() {
+        guard hasMore, !loadingMore, let store else { return }
+        loadingMore = true
+        let page = store.page(query: query, kind: filter, offset: items.count)
+        items += page.items
+        hasMore = page.hasMore
+        loadingMore = false
     }
 
     func debounceReload() {
@@ -97,7 +110,7 @@ final class PanelVM {
     }
 }
 
-/// 历史面板主视图：左列表（摘要）+ 右详情（内容优先，元信息在下），顶部搜索过滤，底部快捷键条
+/// 历史面板主视图：左列表（摘要）+ 右详情（内容优先），顶部搜索过滤，底部快捷键条
 struct HistoryPanelView: View {
     let vm: PanelVM
     let appState: AppState
@@ -109,11 +122,11 @@ struct HistoryPanelView: View {
         VStack(spacing: 0) {
             topBar
             if appState.paused { pausedBanner }
-            Divider().overlay(Color(nsColor: .separatorColor))
+            Divider().overlay(Theme.line)
             HStack(spacing: 0) {
                 masterList
                     .frame(width: 264)
-                Divider().overlay(Color(nsColor: .separatorColor))
+                Divider().overlay(Theme.line)
                 DetailPane(item: vm.selectedItem, appState: appState, actions: actions, vm: vm)
             }
             footerHints
@@ -145,14 +158,14 @@ struct HistoryPanelView: View {
         }
     }
 
-    // MARK: 顶栏（44px：搜索 / 分段过滤 / 暂停 / 设置）
+    // MARK: 顶栏（44px：搜索 / 分段过滤）
 
     private var topBar: some View {
         HStack(spacing: 8) {
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 10))
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    .foregroundStyle(Theme.faint)
                 TextField("搜索剪贴板…", text: Binding(
                     get: { vm.query },
                     set: {
@@ -164,12 +177,29 @@ struct HistoryPanelView: View {
                 .font(.system(size: 12))
                 .focused($searchFocused)
                 .onSubmit { vm.reload() }
+                if !vm.query.isEmpty {
+                    Button {
+                        vm.query = ""
+                        vm.debounceReload()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.faint)
+                    }
+                    .buttonStyle(.plain)
+                    .help("清除搜索")
+                }
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            .background(Theme.pill, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(searchFocused ? Theme.accent.opacity(0.7) : Theme.line,
+                            lineWidth: searchFocused ? 1 : 0.5)
+            )
 
-            // 原生分段控件：自动继承系统最新观感（含 Liquid Glass），tint 靛蓝
+            // 原生分段控件：自动继承系统最新观感（含 Liquid Glass），tint 跟随面板根视图（magpie 靛蓝）
             Picker("", selection: Binding(
                 get: { vm.filter },
                 set: {
@@ -192,17 +222,44 @@ struct HistoryPanelView: View {
     private var pausedBanner: some View {
         HStack(spacing: 6) {
             Image(systemName: "pause.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.amber)
             Text("记录已暂停，此期间的复制不会被保存")
                 .font(.system(size: 11))
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 5)
-        .background(Color.orange.opacity(0.10))
+        .background(Theme.amberSoft)
     }
 
-    // MARK: 左侧：摘要列表（ScrollView + 显式手势：List 的 selection 会与行上双击手势冲突导致单击无响应）
+    // MARK: 左侧：摘要列表（ScrollView + 显式手势；List 的 selection 会与行手势冲突）
+
+    /// 列表行模型：分组微标签 / 条目行
+    private struct ListRow: Identifiable {
+        let id: String
+        let header: String?
+        let item: ClipItem?
+    }
+
+    private var listRows: [ListRow] {
+        var rows: [ListRow] = []
+        if !vm.pinned.isEmpty {
+            rows.append(ListRow(id: "hdr-pinned", header: "★ 置顶", item: nil))
+            for item in vm.pinned {
+                rows.append(ListRow(id: "p-\(item.id)", header: nil, item: item))
+            }
+        }
+        var lastLabel: String?
+        for (idx, item) in vm.items.enumerated() {
+            let label = Theme.groupLabel(for: item.createdAt)
+            if label != lastLabel {
+                rows.append(ListRow(id: "hdr-\(idx)-\(label)", header: label, item: nil))
+                lastLabel = label
+            }
+            rows.append(ListRow(id: "i-\(item.id)", header: nil, item: item))
+        }
+        return rows
+    }
 
     @ViewBuilder
     private var masterList: some View {
@@ -212,18 +269,24 @@ struct HistoryPanelView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        if !vm.pinned.isEmpty {
-                            SectionHeader(title: "★ 置顶")
-                                .id("list-top")
-                            ForEach(vm.pinned) { item in
-                                compactRow(for: item)
+                        Color.clear.frame(height: 0).id("list-top")
+                        ForEach(listRows) { row in
+                            if let header = row.header {
+                                SectionHeader(title: header)
+                            } else if let item = row.item {
+                                CompactRow(vm: vm, appState: appState, actions: actions, item: item)
                             }
-                        } else {
-                            SectionHeader(title: listSectionTitle)
-                                .id("list-top")
                         }
-                        ForEach(vm.items) { item in
-                            compactRow(for: item)
+                        if vm.hasMore {
+                            HStack {
+                                Spacer()
+                                if vm.loadingMore {
+                                    ProgressView().controlSize(.small)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 6)
+                            .onAppear { vm.loadMore() }
                         }
                     }
                     .padding(.horizontal, 8)
@@ -243,105 +306,26 @@ struct HistoryPanelView: View {
         }
     }
 
-    /// 列表分组标题（今天/昨天/本周/更早）
-    private var listSectionTitle: String {
-        vm.items.first.map { Theme.groupLabel(for: $0.createdAt) } ?? "今天"
-    }
-
-    /// 紧凑摘要行：单行显示（预览 + 右侧时间），图片行带小缩略图
-    @ViewBuilder
-    private func compactRow(for item: ClipItem) -> some View {
-        let selected = vm.selectedID == item.id
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(selected ? Color.accentColor : Color.clear)
-                .frame(width: 2, height: 22)
-            if item.kind == .image || item.kind == .screenshot {
-                rowLeading(for: item, thumb: item.thumbPath.flatMap { vm.thumbImages[$0] })
-            }
-            previewLine(for: item)
-                .font(.system(size: 12))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 8)
-            if item.pinned { PinBadge() }
-            Text(Theme.timeString(item.createdAt))
-                .font(.system(size: 10))
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(selected ? Color.accentColor.opacity(0.12) : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .task(id: item.id) {
-            // 缩略图后台解码（64px ImageIO 降采样 + NSCache），行渲染零解码
-            if let path = item.thumbPath, vm.thumbImages[path] == nil {
-                vm.thumbImages[path] = await ImageCache.loadThumb(path: path)
-            }
-        }
-        // 点已选中的行 = 直接粘贴；点未选中的行 = 选中查看详情（再点一次或回车即粘贴）
-        .onTapGesture {
-            if vm.selectedID == item.id {
-                actions.activate(item, paste: appState.settings.autoPaste)
-            } else {
-                vm.selectedID = item.id
-            }
-        }
-        .contextMenu { contextActions(for: item) }
-    }
-
-    /// 图片行的真实缩略图（后台解码缓存；文字/文件行不显示图标）
-    @ViewBuilder
-    private func rowLeading(for item: ClipItem, thumb: NSImage?) -> some View {
-        if let thumb {
-            Image(nsImage: thumb)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 24, height: 24)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5))
-        } else {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color.primary.opacity(0.06))
-                .frame(width: 24, height: 24)
-        }
-    }
-
-    @ViewBuilder
-    private func previewLine(for item: ClipItem) -> some View {
-        switch item.kind {
-        case .text:
-            Text(item.textContent?.replacingOccurrences(of: "\n", with: " ") ?? "")
-        case .image, .screenshot:
-            Text(item.kind == .screenshot ? "截图" : "图片")
-        case .files:
-            Text(item.textContent?.split(separator: "\n").first.map(String.init) ?? "文件")
-        }
-    }
-
     private var emptyListState: some View {
         VStack(spacing: 8) {
             Spacer()
             if vm.query.isEmpty {
                 Image(systemName: "clipboard")
                     .font(.system(size: 30))
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    .foregroundStyle(Theme.faint)
                 Text("剪贴板空空如也")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .foregroundStyle(Theme.muted)
                 Text("复制任何内容，或按 ⌥A 截一张图")
                     .font(.system(size: 11))
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    .foregroundStyle(Theme.faint)
             } else {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 24))
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    .foregroundStyle(Theme.faint)
                 Text("没有匹配的记录")
                     .font(.system(size: 12))
-                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .foregroundStyle(Theme.muted)
             }
             Spacer()
         }
@@ -354,15 +338,14 @@ struct HistoryPanelView: View {
         HStack(spacing: 10) {
             Text("↑↓ 选择").keyStyle()
             Text("⏎ 粘贴").keyStyle()
-            Text("双击粘贴").keyStyle()
             Text("⌘⏎ 复制").keyStyle()
             Text("⌫ 删除").keyStyle()
             Spacer()
             Text("⌘1-9 置顶粘贴").keyStyle()
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .frame(height: 28)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Theme.card2)
     }
 
     // MARK: 右键菜单
@@ -374,9 +357,12 @@ struct HistoryPanelView: View {
         if item.kind == .text {
             Button("复制为纯文本") { actions.copyPlain(item) }
         }
+        if item.isVisual {
+            Button("标注") { actions.annotate(item) }
+        }
         Divider()
         Button(item.pinned ? "取消置顶" : "置顶") { actions.togglePin(item) }
-        if item.kind == .image || item.kind == .screenshot {
+        if item.isVisual {
             Button("贴图") { _ = actions.pinToScreen(item) }
         }
         Divider()
@@ -478,6 +464,117 @@ struct HistoryPanelView: View {
     }
 }
 
+// MARK: - 列表行（悬停 pill / 选中靛蓝条 / 等宽时间）
+
+private struct CompactRow: View {
+    let vm: PanelVM
+    let appState: AppState
+    let actions: any PanelActions
+    let item: ClipItem
+
+    @State private var hovering = false
+
+    private var selected: Bool { vm.selectedID == item.id }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(selected ? Theme.accent : Color.clear)
+                .frame(width: 2, height: 22)
+            if item.isVisual {
+                rowLeading
+            }
+            previewLine
+                .font(.system(size: 12))
+                .foregroundStyle(selected ? Theme.fg : Theme.fg2)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            if item.pinned { PinBadge() }
+            Text(Theme.listTime(item.createdAt))
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(hovering || selected ? Theme.muted : Theme.faint)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(selected ? Theme.sel : (hovering ? Theme.pill : Color.clear))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .task(id: item.id) {
+            // 缩略图后台解码（64px ImageIO 降采样 + NSCache），行渲染零解码
+            if let path = item.displayImagePath, vm.thumbImages[path] == nil {
+                vm.thumbImages[path] = await ImageCache.loadThumb(path: path)
+            }
+        }
+        // 点已选中的行 = 直接粘贴；点未选中的行 = 选中查看详情（再点一次或回车即粘贴）
+        .onTapGesture {
+            if vm.selectedID == item.id {
+                actions.activate(item, paste: appState.settings.autoPaste)
+            } else {
+                vm.selectedID = item.id
+            }
+        }
+        .contextMenu { contextActions() }
+    }
+
+    /// 图片行缩略图（图片/截图/单个图片文件统一走真实缩略图）
+    @ViewBuilder
+    private var rowLeading: some View {
+        if let path = item.displayImagePath, let thumb = vm.thumbImages[path] {
+            Image(nsImage: thumb)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.line.opacity(0.5), lineWidth: 0.5))
+        } else {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Theme.pill)
+                .frame(width: 24, height: 24)
+        }
+    }
+
+    @ViewBuilder
+    private var previewLine: some View {
+        switch item.kind {
+        case .text:
+            Text(item.textContent?.replacingOccurrences(of: "\n", with: " ") ?? "")
+        case .image:
+            Text("图片")
+        case .screenshot:
+            Text("截图")
+        case .files:
+            if let imagePath = item.imageFilePath {
+                Text((imagePath as NSString).lastPathComponent)
+            } else {
+                Text(item.textContent?.split(separator: "\n").first.map(String.init) ?? "文件")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func contextActions() -> some View {
+        Button("粘贴") { actions.activate(item, paste: appState.settings.autoPaste) }
+        Button("仅复制") { actions.activate(item, paste: false) }
+        if item.kind == .text {
+            Button("复制为纯文本") { actions.copyPlain(item) }
+        }
+        if item.isVisual {
+            Button("标注") { actions.annotate(item) }
+        }
+        Divider()
+        Button(item.pinned ? "取消置顶" : "置顶") { actions.togglePin(item) }
+        if item.isVisual {
+            Button("贴图") { _ = actions.pinToScreen(item) }
+        }
+        Divider()
+        Button("删除", role: .destructive) { actions.delete(item) }
+    }
+}
+
 // MARK: - 右侧详情：内容优先，操作按钮与元信息在底部
 
 /// 详情面板：主体内容（大图/全文/文件清单）占据上部主要空间，底部为操作按钮 + 元信息
@@ -492,7 +589,7 @@ struct DetailPane: View {
             if let item {
                 VStack(spacing: 0) {
                     content(for: item)          // 详情优先展示
-                    Divider().overlay(Color(nsColor: .separatorColor))
+                    Divider().overlay(Theme.line)
                     footer(for: item)           // 操作按钮 + 元信息
                 }
                 .task(id: item.id) {
@@ -501,7 +598,7 @@ struct DetailPane: View {
                     vm.detailTransformKey = nil
                     vm.detailImage = nil
                     // 大图优先（降采样后台解码），再补来源图标
-                    if item.kind == .image || item.kind == .screenshot, let path = item.mediaPath {
+                    if let path = item.displayImagePath {
                         vm.detailImage = await ImageCache.loadDetail(path: path)
                     }
                     vm.detailIcon = await FaviconService.icon(
@@ -543,14 +640,17 @@ struct DetailPane: View {
                 detailButton(item.pinned ? "取消置顶" : "置顶", symbol: "pin") {
                     actions.togglePin(item)
                 }
-                if item.kind == .image || item.kind == .screenshot {
+                if item.isVisual {
                     detailButton("贴图", symbol: "pin.fill") {
                         _ = actions.pinToScreen(item)
                     }
-                }
-                if item.kind == .image || item.kind == .screenshot, let path = item.mediaPath {
-                    detailButton("访达", symbol: "folder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    detailButton("标注", symbol: "pencil.and.outline") {
+                        actions.annotate(item)
+                    }
+                    if let path = item.displayImagePath {
+                        detailButton("访达", symbol: "folder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -571,29 +671,31 @@ struct DetailPane: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 12)
     }
 
+    /// magpie text 按钮：pill 底 + 发丝线（浅色下与纯白详情区有边界），已应用态 accentSoft+accent
     private func detailButton(_ title: String, symbol: String, role: ButtonRole? = nil,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.system(size: 11, weight: .medium))
                 .labelStyle(.titleAndIcon)
+                .fixedSize()
         }
         .buttonStyle(.plain)
-        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : Color.primary)
+        .foregroundStyle(role == .destructive ? Theme.red : Theme.fg2)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(role == .destructive ? Color(nsColor: .systemRed).opacity(0.10) : Theme.card)
+                .fill(role == .destructive ? Theme.redSoft : Theme.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+                .stroke(role == .destructive ? Theme.red.opacity(0.4) : Theme.line, lineWidth: 0.5)
         )
         .help(title)
     }
@@ -602,20 +704,24 @@ struct DetailPane: View {
 
     @ViewBuilder
     private func content(for item: ClipItem) -> some View {
-        switch item.kind {
-        case .image, .screenshot:
+        if item.isVisual {
             imageContent(for: item)
-        case .text:
-            textContent(for: item)
-        case .files:
-            filesContent(for: item)
+        } else {
+            switch item.kind {
+            case .text:
+                textContent(for: item)
+            case .files:
+                filesContent(for: item)
+            default:
+                imageContent(for: item)
+            }
         }
     }
 
     /// 图片：撑满可用空间的大图预览（后台降采样解码，加载中显示占位）
     @ViewBuilder
     private func imageContent(for item: ClipItem) -> some View {
-        if let path = item.mediaPath {
+        if let path = item.displayImagePath {
             if let image = vm.detailImage {
                 Image(nsImage: image)
                     .resizable()
@@ -624,7 +730,7 @@ struct DetailPane: View {
                     .padding(12)
             } else {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.primary.opacity(0.06))
+                    .fill(Theme.pill)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(ProgressView())
                     .padding(12)
@@ -632,7 +738,7 @@ struct DetailPane: View {
         } else {
             Image(systemName: "photo")
                 .font(.system(size: 40))
-                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                .foregroundStyle(Theme.faint)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -644,6 +750,7 @@ struct DetailPane: View {
             ScrollView {
                 Text(vm.detailTransformed ?? item.textContent ?? "")
                     .font(.system(size: 13))
+                    .foregroundStyle(Theme.fg)
                     .lineSpacing(3)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -653,46 +760,108 @@ struct DetailPane: View {
         }
     }
 
-    /// 文本处理工具行（高频：去换行/去空格/JSON 美化/URL 解码/时间戳/翻译）
+    /// 文本工具行（按钮固定理想宽度；超宽时横向滚动兜底）
     private func toolRow(for item: ClipItem) -> some View {
-        HStack(spacing: 6) {
-            ForEach([("去换行", "newlines"), ("去空格", "spaces"), ("JSON 美化", "json"),
-                     ("URL 解码", "urldecode"), ("时间戳→日期", "timestamp"),
-                     ("翻译", "translation")], id: \.1) { pair in
-                let applied = vm.detailTransformKey == pair.1
-                Button {
-                    applyTransform(pair.1, item)
-                } label: {
-                    Text(pair.0)
-                        .font(.system(size: 11, weight: applied ? .semibold : .regular))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+        let hints = Self.hintKeys(for: item.textContent ?? "")
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Self.tools, id: \.key) { tool in
+                    let applied = vm.detailTransformKey == tool.key
+                    let hinted = hints.contains(tool.key) && !applied
+                    Button {
+                        applyTransform(tool.key, item)
+                    } label: {
+                        Text(tool.title)
+                            .font(.system(size: 11, weight: applied ? .semibold : .regular))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .fixedSize()
+                            .overlay(alignment: .topTrailing) {
+                                if hinted {
+                                    Circle()
+                                        .fill(Theme.accent)
+                                        .frame(width: 5, height: 5)
+                                        .offset(x: 2, y: -1)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(applied ? Theme.accent : Theme.fg2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(applied ? Theme.accentSoft : Theme.card)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(applied ? Color.clear : Theme.line, lineWidth: 0.5)
+                    )
+                    .help(hinted ? "内容看起来适合此工具" : tool.title)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(applied ? Color.accentColor : Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(applied ? Color.accentColor.opacity(0.14) : Theme.card)
-                )
-            }
-            if vm.detailTransformed != nil {
-                Button {
-                    vm.detailTransformed = nil
-                    vm.detailTransformKey = nil
-                } label: {
-                    Text("还原")
-                        .font(.system(size: 11))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                if vm.detailTransformed != nil {
+                    Button {
+                        vm.detailTransformed = nil
+                        vm.detailTransformKey = nil
+                    } label: {
+                        Text("还原")
+                            .font(.system(size: 11))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .fixedSize()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.ctlFg)
+                    .background(Theme.pill, in: RoundedRectangle(cornerRadius: 6))
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
+        .scrollIndicators(.never)
+        .padding(.horizontal, 12)
         .padding(.top, 10)
+    }
+
+    private struct TextTool {
+        let key: String
+        let title: String
+    }
+
+    private static let tools: [TextTool] = [
+        TextTool(key: "newlines", title: "去换行"),
+        TextTool(key: "spaces", title: "去空格"),
+        TextTool(key: "json", title: "JSON 美化"),
+        TextTool(key: "urldecode", title: "URL 解码"),
+        TextTool(key: "timestamp", title: "时间戳→日期"),
+        TextTool(key: "base64", title: "Base64 解码"),
+        TextTool(key: "upper", title: "转大写"),
+        TextTool(key: "lower", title: "转小写"),
+        TextTool(key: "html", title: "HTML→文本"),
+        TextTool(key: "translation", title: "翻译"),
+    ]
+
+    /// 智能提示：内容形态匹配的工具加强调点
+    private static func hintKeys(for text: String) -> Set<String> {
+        var hints = Set<String>()
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return hints }
+        if t.hasPrefix("{") || t.hasPrefix("["),
+           (try? JSONSerialization.jsonObject(with: Data(t.utf8))) != nil {
+            hints.insert("json")
+        }
+        if t.range(of: "%[0-9A-Fa-f]{2}", options: .regularExpression) != nil {
+            hints.insert("urldecode")
+        }
+        let digits = t.replacingOccurrences(of: " ", with: "")
+        if !digits.isEmpty, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }), [10, 13].contains(digits.count) {
+            hints.insert("timestamp")
+        }
+        if t.count >= 16, t.range(of: #"^[A-Za-z0-9+/=]+[=:;,]*$"#, options: .regularExpression) != nil {
+            hints.insert("base64")
+        }
+        let lower = t.lowercased()
+        if lower.contains("<p>") || lower.contains("<br") || lower.contains("<html") || lower.contains("<div") {
+            hints.insert("html")
+        }
+        return hints
     }
 
     /// 应用文本转换：就地显示 + 自动复制处理结果
@@ -740,19 +909,39 @@ struct DetailPane: View {
             }
         case "timestamp":
             let digits = original.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !digits.isEmpty, digits.allSatisfy({ $0.isNumber }) else {
+            guard !digits.isEmpty, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }) else {
                 appState.showToast("内容不是纯数字时间戳")
                 return
             }
             let interval: TimeInterval
             if digits.count >= 13 {
-                interval = Double(digits.prefix(13))! / 1000
+                interval = Double(digits.prefix(13)) ?? 0
             } else {
-                interval = Double(digits.prefix(10))!
+                interval = Double(digits.prefix(10)) ?? 0
             }
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
             result = formatter.string(from: Date(timeIntervalSince1970: interval))
+        case "base64":
+            let trimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let data = Data(base64Encoded: trimmed), let s = String(data: data, encoding: .utf8) {
+                result = s
+            } else {
+                appState.showToast("不是有效的 Base64（或不是 UTF-8 文本）")
+                return
+            }
+        case "upper":
+            result = original.uppercased()
+        case "lower":
+            result = original.lowercased()
+        case "html":
+            var s = original.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            let entities = [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " ")]
+            for (entity, replacement) in entities {
+                s = s.replacingOccurrences(of: entity, with: replacement)
+            }
+            while s.contains("  ") { s = s.replacingOccurrences(of: "  ", with: " ") }
+            result = s.trimmingCharacters(in: .whitespacesAndNewlines)
         default:
             return
         }
@@ -801,25 +990,27 @@ struct DetailPane: View {
                         HStack(spacing: 8) {
                             Image(systemName: "doc")
                                 .font(.system(size: 11))
-                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                                .foregroundStyle(Theme.ctlFg)
                             Text((path as NSString).lastPathComponent)
                                 .font(.system(size: 12))
+                                .foregroundStyle(Theme.fg2)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Spacer()
                             Text("在访达中显示")
                                 .font(.system(size: 10))
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(Theme.accent)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line, lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
                 }
                 Text("点击条目在访达中显示文件")
                     .font(.system(size: 10))
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    .foregroundStyle(Theme.faint)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -831,10 +1022,10 @@ struct DetailPane: View {
         VStack(spacing: 8) {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 30))
-                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                .foregroundStyle(Theme.faint)
             Text("选择左侧条目查看详情")
                 .font(.system(size: 12))
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -842,8 +1033,8 @@ struct DetailPane: View {
 
 private extension Text {
     func keyStyle() -> some View {
-        font(.system(size: 10))
-            .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+        font(.system(size: 10.5))
+            .foregroundStyle(Theme.muted)
     }
 }
 

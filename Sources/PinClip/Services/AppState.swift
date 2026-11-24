@@ -12,6 +12,8 @@ protocol PanelActions: AnyObject {
     func delete(_ item: ClipItem)
     /// 历史图片 → 贴图浮窗
     func pinToScreen(_ item: ClipItem) -> PinRequestResult
+    /// 历史图片 → 重新标注（复用截图遮罩）
+    func annotate(_ item: ClipItem)
     func hidePanel()
     func openSettings()
     /// 引导页「开始使用」：标记完成并隐藏引导
@@ -99,6 +101,7 @@ final class AppState {
     weak var launchManager: (any LaunchAtStartupManaging)?
     weak var historyStore: HistoryStore?
     weak var panelActions: (any PanelActions)?
+    weak var androidSync: AndroidSyncService?
 
     func openSaveFolder() {
         let dir = Paths.mediaDir

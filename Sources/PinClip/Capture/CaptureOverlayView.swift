@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 截图遮罩主视图：冻结帧背景 + 暗化遮罩 + 选区 + 窗口吸附高亮 + 标注 + 工具条 + 尺寸角标
+/// 截图遮罩主视图：冻结帧背景 + 暗化遮罩 + 选区 + 窗口吸附高亮 + 标注 + 工具条 + 放大镜 + 尺寸角标
 struct CaptureOverlayView: View {
     let state: DisplayCaptureState
     let controller: OverlayController
@@ -51,6 +51,11 @@ struct CaptureOverlayView: View {
                     textDraftField(draft)
                 }
             }
+
+            // 放大镜（picking 态：悬停/拖拽时跟随光标；吸附高亮出现时隐藏避免干扰）
+            if state.phase == .picking, state.hoverSnap == nil, let cp = state.cursorPoint {
+                MagnifierView(state: state, at: cp)
+            }
         }
         .frame(width: state.bgPointSize.width, height: state.bgPointSize.height)
         .contentShape(Rectangle())
@@ -58,12 +63,29 @@ struct CaptureOverlayView: View {
         // 注意：不要在此处加 onTapGesture——与 minimumDistance:0 的拖拽手势产生识别竞争，
         // 会吞掉第一次拖拽（曾导致"第一次画选区不生效"）
         .onContinuousHover { phase in
-            // 拖拽进行中不更新吸附（避免覆盖初始/拖拽中的选区逻辑）
-            if case .active(let location) = phase, state.phase == .picking, state.dragStart == nil {
-                state.hoverSnap = topSnapWindow(containing: location)
-            } else if case .ended = phase, state.dragStart == nil {
-                state.hoverSnap = nil
+            switch phase {
+            case .active(let location):
+                if state.phase == .picking {
+                    if state.dragStart == nil {
+                        state.hoverSnap = topSnapWindow(containing: location)
+                    }
+                    state.cursorPoint = location
+                }
+            case .ended:
+                if state.dragStart == nil {
+                    state.hoverSnap = nil
+                    state.cursorPoint = nil
+                }
             }
+        }
+        .onChange(of: state.cursorPoint) { _, newPoint in
+            // 放大镜取色：1×1 绘制采样，代价极小
+            guard let cp = newPoint else {
+                state.cursorColorHex = nil
+                return
+            }
+            let pixel = CGPoint(x: cp.x * state.scale, y: cp.y * state.scale)
+            state.cursorColorHex = ImageKit.sampleColor(of: state.bgImage, atPixel: pixel)
         }
     }
 
@@ -93,9 +115,17 @@ struct CaptureOverlayView: View {
                     if state.dragStart == nil {
                         state.beginDrag(at: value.startLocation)
                     }
-                    state.updateDrag(to: value.location)
+                    // 按住 ⇧ 锁定正方形
+                    state.updateDrag(to: value.location, square: NSEvent.modifierFlags.contains(.shift))
+                    state.cursorPoint = value.location
                 case .editing:
                     if state.tool == .none, state.textDraft == nil {
+                        // 工具栏区域：根手势完全不干预，按下与点击交给按钮自身处理
+                        // （否则 startReselect 会在按下时清空选区——"工具栏消失需重画"的根因）
+                        if let sel = state.selection,
+                           state.toolbarFrame(for: sel).contains(value.startLocation) {
+                            return
+                        }
                         // 微信式：拖角调整 / 拖内部移动 / 拖外部重新框选
                         if state.editDrag == nil, state.dragStart == nil, !state.beginEditDrag(at: value.startLocation) {
                             state.startReselect(at: value.startLocation)
@@ -103,7 +133,7 @@ struct CaptureOverlayView: View {
                         if state.editDrag != nil {
                             state.updateEditDrag(to: value.location)
                         } else if state.dragStart != nil {
-                            state.updateDrag(to: value.location)
+                            state.updateDrag(to: value.location, square: NSEvent.modifierFlags.contains(.shift))
                         }
                     } else {
                         updateActiveStroke(at: value.location, anchor: value.startLocation, moved: abs(value.translation.width) + abs(value.translation.height))
@@ -153,7 +183,7 @@ struct CaptureOverlayView: View {
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(Color.white.opacity(0.08))
-                .overlay(RoundedRectangle(cornerRadius: 2).stroke(Theme.accent, lineWidth: 2))
+                .overlay(RoundedRectangle(cornerRadius: 2).stroke(Theme.selectionBlue, lineWidth: 2))
             Text("\(snap.appName)\(snap.title.isEmpty ? "" : " · \(snap.title)")")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white)
@@ -181,8 +211,8 @@ struct CaptureOverlayView: View {
     }
 
     private func toolbarPosition(for sel: CGRect) -> CGPoint {
-        let below = sel.maxY + 36
-        return CGPoint(x: sel.midX, y: below < state.bgPointSize.height - 10 ? below : sel.minY - 36)
+        let frame = state.toolbarFrame(for: sel)
+        return CGPoint(x: frame.midX, y: frame.midY)
     }
 
     // MARK: 文字工具输入框
@@ -220,12 +250,7 @@ struct CaptureOverlayView: View {
         let end = selLocal(location)
         let start = selLocal(anchor)
         switch state.tool {
-        case .rect, .ellipse, .mosaic:
-            state.activeStroke = Stroke(
-                kind: state.tool.strokeKind, color: state.strokeColor, width: state.strokeWidth,
-                start: start, end: end
-            )
-        case .line, .arrow:
+        case .rect, .ellipse, .mosaic, .line, .arrow:
             state.activeStroke = Stroke(
                 kind: state.tool.strokeKind, color: state.strokeColor, width: state.strokeWidth,
                 start: start, end: end
@@ -285,6 +310,78 @@ struct CaptureOverlayView: View {
             }
         }
         return nil
+    }
+}
+
+// MARK: - 放大镜（选区悬停/拖拽时的像素级放大 + 坐标/颜色提示）
+
+struct MagnifierView: View {
+    let state: DisplayCaptureState
+    let at: CGPoint
+
+    private let lensSize: CGFloat = 96
+    private let zoom: CGFloat = 6
+
+    var body: some View {
+        VStack(spacing: 4) {
+            lens
+            Text(labelText)
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.65), in: Capsule())
+        }
+        .offset(x: offset.x, y: offset.y)
+        .allowsHitTesting(false)
+    }
+
+    /// 贴光标右下；靠右/靠下时翻到另一侧，避免出屏
+    private var offset: CGPoint {
+        let pad: CGFloat = 18
+        var x = at.x + pad
+        var y = at.y + pad
+        let total = lensSize + 24
+        if x + total > state.bgPointSize.width { x = at.x - total - pad }
+        if y + total > state.bgPointSize.height { y = at.y - total - pad }
+        return CGPoint(x: x, y: y)
+    }
+
+    private var lens: some View {
+        ZStack(alignment: .topLeading) {
+            Image(decorative: state.bgImage, scale: state.scale)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: state.bgPointSize.width * zoom, height: state.bgPointSize.height * zoom)
+                .offset(x: lensSize / 2 - at.x * zoom, y: lensSize / 2 - at.y * zoom)
+            crosshair
+        }
+        .frame(width: lensSize, height: lensSize, alignment: .topLeading)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Theme.selectionBlue, lineWidth: 1.5))
+        .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
+    }
+
+    private var crosshair: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.white.opacity(0.9))
+                .frame(width: lensSize, height: 1)
+                .shadow(color: .black.opacity(0.6), radius: 0.5)
+            Rectangle()
+                .fill(Color.white.opacity(0.9))
+                .frame(width: 1, height: lensSize)
+                .shadow(color: .black.opacity(0.6), radius: 0.5)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var labelText: String {
+        let px = Int(at.x * state.scale), py = Int(at.y * state.scale)
+        if let hex = state.cursorColorHex {
+            return "\(px), \(py) · \(hex)"
+        }
+        return "\(px), \(py)"
     }
 }
 

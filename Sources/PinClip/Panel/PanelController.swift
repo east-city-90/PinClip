@@ -2,18 +2,19 @@ import AppKit
 import SwiftUI
 
 /// 历史面板：非激活 NSPanel（呼出不抢原 App 焦点，自动粘贴无需重新激活）
-/// 面板宽 420，贴菜单栏下方；失焦自动收起；实现 PanelActions 供 SwiftUI 调用
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate, PanelActions {
     private let panel: PanelPanel
     /// 失焦收起的抑制开关：showPanel 内部的 orderOut 会触发一次 resignKey，不能被当成用户点走
     private var resignSuppress = false
     private let settingsStore: SettingsStore
-    private let panelVM: PanelVM
+    let panelVM: PanelVM
     private weak var appState: AppState?
     private weak var store: HistoryStore?
     private weak var pinController: PinWindowController?
     private weak var settingsWindow: SettingsWindowController?
+    /// 历史图片「标注」复用截图遮罩
+    weak var overlay: OverlayController?
 
     init(appState: AppState,
          store: HistoryStore,
@@ -139,8 +140,22 @@ final class PanelController: NSObject, NSWindowDelegate, PanelActions {
 
     func pinToScreen(_ item: ClipItem) -> PinRequestResult {
         hidePanel()
-        guard let path = item.mediaPath else { return .notImage }
+        guard let path = item.displayImagePath else { return .notImage }
         return pinController?.pin(fileAtPath: path) ?? .notImage
+    }
+
+    /// 历史图片 → 重新标注（复用截图遮罩，编辑后走复制/保存/贴图出口）
+    func annotate(_ item: ClipItem) {
+        hidePanel()
+        guard let path = item.displayImagePath else { return }
+        Task { [weak self] in
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let cg = ImageKit.cgImage(from: data) else {
+                await MainActor.run { self?.appState?.showToast("图片读取失败") }
+                return
+            }
+            self?.overlay?.beginAnnotateExisting(cg)
+        }
     }
 
     func openSettings() {
@@ -154,7 +169,7 @@ final class PanelController: NSObject, NSWindowDelegate, PanelActions {
     }
 }
 
-/// 面板根视图：权限引导 ↔ 历史面板切换（毛玻璃底 + 圆角描边，窗口本身透明）
+/// 面板根视图：权限引导 ↔ 历史面板切换（Liquid Glass 玻璃底 + 圆角，窗口本身透明）
 struct PanelRootView: View {
     let appState: AppState
     let actions: any PanelActions
@@ -169,8 +184,8 @@ struct PanelRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .systemGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .tint(Color.accentColor)
+        .glassSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .tint(Theme.accent)
     }
 }
 

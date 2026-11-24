@@ -16,6 +16,8 @@ enum Paths {
 
     static let dbURL = appSupport.appendingPathComponent("pinclip.db")
     static let settingsURL = appSupport.appendingPathComponent("settings.json")
+    /// 贴图恢复状态（重启还原贴图）
+    static let pinsURL = appSupport.appendingPathComponent("pins.json")
 
     static let mediaDir: URL = appSupport.appendingPathComponent("media", isDirectory: true)
     static let captureCacheDir: URL = appSupport.appendingPathComponent("CaptureCache", isDirectory: true)

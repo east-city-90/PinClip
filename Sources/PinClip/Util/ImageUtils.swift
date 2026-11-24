@@ -26,6 +26,36 @@ enum ImageKit {
         return (w, h)
     }
 
+    /// 剪贴板位图规范化：png 有效直接用；否则 TIFF → PNG。
+    /// 只做数据级判断（不解码像素），真正的解码/编码由调用方放在后台队列。
+    static func canonicalImage(png: Data?, tiff: Data?) -> (data: Data, width: Int, height: Int)? {
+        if let png, let size = pixelSize(of: png) { return (png, size.width, size.height) }
+        if let tiff, let rep = NSBitmapImageRep(data: tiff),
+           let out = rep.representation(using: .png, properties: [:]) {
+            return (out, rep.pixelsWide, rep.pixelsHigh)
+        }
+        return nil
+    }
+
+    /// 取图像某像素的颜色（hex）。1×1 上下文绘制，代价极小，可实时调用（放大镜/贴图取色）。
+    /// 坐标为图像像素（左上原点）。失败或越界返回 nil。
+    static func sampleColor(of image: CGImage, atPixel p: CGPoint) -> String? {
+        guard p.x >= 0, p.y >= 0, p.x < CGFloat(image.width), p.y < CGFloat(image.height),
+              let ctx = CGContext(
+                  data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+        // 把图像画成"目标像素落在 (0,0)"：top-left 像素 (x,y) 映射到 ctx 点 (minX+x, maxY-y)
+        let rect = CGRect(x: -p.x, y: p.y - CGFloat(image.height),
+                          width: CGFloat(image.width), height: CGFloat(image.height))
+        ctx.draw(image, in: rect)
+        guard let data = ctx.data else { return nil }
+        let px = data.bindMemory(to: UInt8.self, capacity: 4)
+        return String(format: "#%02X%02X%02X", px[0], px[1], px[2])
+    }
+
     // MARK: 缩略图
 
     /// 缩略图 ≤maxDim；不透明图存 JPEG（更小），含透明存 PNG；返回 (路径, 宽, 高)

@@ -7,7 +7,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "PinClip",
-            path: "Sources/PinClip"
+            path: "Sources/PinClip",
+            resources: [
+                .copy("Resources/AndroidSync")
+            ]
         )
     ]
 )

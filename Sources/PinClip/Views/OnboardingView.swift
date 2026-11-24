@@ -9,7 +9,7 @@ struct OnboardingView: View {
         VStack(spacing: 18) {
             Image(systemName: "camera.viewfinder")
                 .font(.system(size: 44, weight: .light))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Theme.accent)
             VStack(spacing: 6) {
                 Text("开启屏幕录制权限")
                     .font(.system(size: 15, weight: .semibold))
@@ -26,7 +26,7 @@ struct OnboardingView: View {
                 if appState.screenPermission {
                     Label("权限已就绪", systemImage: "checkmark.circle.fill")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Theme.green)
                     Button {
                         actions.dismissOnboarding()
                     } label: {
@@ -35,8 +35,8 @@ struct OnboardingView: View {
                             .frame(width: 160, height: 30)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(Theme.accentFg)
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8))
                 } else {
                     Button {
                         appState.openScreenPermissionSettings()
@@ -46,8 +46,8 @@ struct OnboardingView: View {
                             .frame(width: 160, height: 30)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(Theme.accentFg)
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8))
 
                     Button {
                         Task { await appState.requestScreenPermission() }
@@ -57,7 +57,7 @@ struct OnboardingView: View {
                             .frame(width: 160, height: 26)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.accent)
 
                     // 剪贴板功能无需屏幕权限，允许先逛
                     Button {

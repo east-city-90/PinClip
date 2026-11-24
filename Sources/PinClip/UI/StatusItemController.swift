@@ -5,9 +5,12 @@ import AppKit
 final class StatusItemController: NSObject, NSMenuDelegate {
     struct Actions {
         let regionCapture: () -> Void
+        let delayedRegionCapture: () -> Void
         let fullscreenCapture: () -> Void
         let togglePanel: () -> Void
         let pinFromClipboard: () -> Void
+        let pastePlainText: () -> Void
+        let checkUpdates: () -> Void
         let openSettings: () -> Void
         let quit: () -> Void
     }
@@ -46,15 +49,28 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         panelItem.target = self
         let regionItem = menu.addItem(withTitle: "区域截图", action: #selector(regionAction), keyEquivalent: "")
         regionItem.target = self
+        let delayedItem = menu.addItem(withTitle: "延时区域截图（\(settings.delaySeconds) 秒）", action: #selector(delayedRegionAction), keyEquivalent: "")
+        delayedItem.target = self
         let fullItem = menu.addItem(withTitle: "全屏截图", action: #selector(fullscreenAction), keyEquivalent: "")
         fullItem.target = self
         let pinItem = menu.addItem(withTitle: "贴图（剪贴板当前图）", action: #selector(pinAction), keyEquivalent: "")
         pinItem.target = self
+        let plainItem = menu.addItem(withTitle: "纯文本粘贴", action: #selector(pastePlainAction), keyEquivalent: "")
+        plainItem.target = self
 
-        for (item, action) in [(panelItem, HotkeyAction.panel), (regionItem, .region), (fullItem, .fullscreen), (pinItem, .pin)] {
+        // 快捷键展示：修饰键组合 → 菜单键符；F 键 → 标题后缀（系统菜单键符不支持 F 键直书）
+        let pairs: [(NSMenuItem, HotkeyAction)] = [
+            (panelItem, .panel), (regionItem, .region), (fullItem, .fullscreen),
+            (pinItem, .pin), (plainItem, .pastePlain),
+        ]
+        for (item, action) in pairs {
             if let spec = settings.hotkeys[action] ?? hotkeys?.spec(for: action) {
-                item.keyEquivalent = keyEquivalentString(for: spec)
-                item.keyEquivalentModifierMask = modifierMask(for: spec)
+                if let fname = HotkeySpec.functionName(keyCode: spec.keyCode) {
+                    item.title += "（\(fname)）"
+                } else {
+                    item.keyEquivalent = keyEquivalentString(for: spec)
+                    item.keyEquivalentModifierMask = modifierMask(for: spec)
+                }
             }
         }
 
@@ -65,6 +81,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         pauseItem = pause
 
         menu.addItem(.separator())
+        let updateItem = menu.addItem(withTitle: "检查更新…", action: #selector(checkUpdatesAction), keyEquivalent: "")
+        updateItem.target = self
         let settingsItem = menu.addItem(withTitle: "设置…", action: #selector(settingsAction), keyEquivalent: ",")
         settingsItem.target = self
         settingsItem.keyEquivalentModifierMask = .command
@@ -79,14 +97,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func togglePanelAction() { actions.togglePanel() }
     @objc private func regionAction() { actions.regionCapture() }
+    @objc private func delayedRegionAction() { actions.delayedRegionCapture() }
     @objc private func fullscreenAction() { actions.fullscreenCapture() }
     @objc private func pinAction() { actions.pinFromClipboard() }
+    @objc private func pastePlainAction() { actions.pastePlainText() }
+    @objc private func checkUpdatesAction() { actions.checkUpdates() }
     @objc private func settingsAction() { actions.openSettings() }
     @objc private func quitAction() { actions.quit() }
 
     @objc private func aboutAction() {
-        appState?.showToast("PinClip 贴剪 v0.1.0 · 截图 + 贴图 + 剪贴板，三合一")
-        actions.togglePanel()
+        // 标准关于面板（版本号读 Info.plist；此前 toast 里写死 v0.1.0）
+        NSApp.activate(ignoringOtherApps: true)
+        let credits = NSAttributedString(string: "截图 + 贴图 + 剪贴板历史，三合一轻量工具\n全本地处理 · 无遥测 · MIT License")
+        NSApp.orderFrontStandardAboutPanel(options: [
+            NSApplication.AboutPanelOptionKey.credits: credits,
+        ])
     }
 
     @objc private func togglePauseAction() {
@@ -97,12 +122,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: 快捷键展示（⌥A → 菜单键符）
 
     private func keyEquivalentString(for spec: HotkeySpec) -> String {
-        if spec.keyCode >= 0x70 { // F 功能键
-            return "F\(spec.keyCode - 0x7F)"
-        }
         let map: [UInt32: String] = [
             0x00: "a", 0x01: "s", 0x02: "d", 0x03: "f", 0x09: "v", 0x0B: "b",
-            0x11: "b", 0x14: "e", 0x0D: "w", 0x0F: "r", 0x76: "F4", 0x63: "F3",
+            0x14: "e", 0x0D: "w", 0x0F: "r",
         ]
         return map[spec.keyCode] ?? String(Character(UnicodeScalar(UInt8(spec.keyCode + 0x61))))
     }

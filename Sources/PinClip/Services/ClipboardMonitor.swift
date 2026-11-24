@@ -7,6 +7,7 @@ final class ClipboardMonitor {
     private var lastChangeCount: Int
     private weak var store: HistoryStore?
     private let settingsProvider: () -> AppSettings
+    weak var androidSync: AndroidSyncService?
 
     init(store: HistoryStore, settingsProvider: @escaping () -> AppSettings) {
         self.store = store
@@ -36,6 +37,9 @@ final class ClipboardMonitor {
         let settings = settingsProvider()
         guard !settings.paused else { return }
 
+        // 自己刚写回的（面板回填 / 截图复制 / 贴图复制）不算一次新复制
+        if ClipboardWriter.isOwnWrite(changeCount: cc) { return }
+
         let source = AppSource.current()
         let sourceURL = ClipboardReader.currentSourceURL()
         let content = ClipboardReader.readCurrent()
@@ -44,11 +48,15 @@ final class ClipboardMonitor {
         switch content {
         case .text(let text):
             let (ok, _) = PrivacyFilter.shouldRecord(settings: settings, kind: .text, text: text, source: source)
-            if ok { store.record(text: text, source: source, sourceURL: sourceURL) }
+            if ok {
+                store.record(text: text, source: source, sourceURL: sourceURL)
+                // Android 同步：文本推送到手机剪贴板（写入方向不受 Android 限制）
+                androidSync?.pushToAndroid(text)
+            }
 
-        case .image(let png, _, _):
+        case .image(let png, let tiff):
             let (ok, _) = PrivacyFilter.shouldRecord(settings: settings, kind: .image, text: nil, source: source)
-            if ok { store.recordImage(pngData: png, source: source, kind: .image, sourceURL: sourceURL) }
+            if ok { store.recordImage(png: png, tiff: tiff, source: source, sourceURL: sourceURL) }
 
         case .files(let paths):
             let joined = paths.joined(separator: "\n")

@@ -7,7 +7,8 @@ enum ClipboardReader {
 
     enum Content {
         case text(String)
-        case image(png: Data, width: Int, height: Int)
+        /// 原始位图载荷（png / tiff 至少一项非空）。位图解码与 PNG 编码在后台队列做，主线程每类数据只读一次。
+        case image(png: Data?, tiff: Data?)
         case files([String])
         case none
     }
@@ -22,15 +23,14 @@ enum ClipboardReader {
             return .files(urls.map { $0.path })
         }
 
-        // 2) 图片（PNG 或 TIFF 原始数据，避免 NSImage 对文件路径的隐式解析）
-        let pngData = pb.data(forType: .png)
-        if pngData != nil || pb.data(forType: .tiff) != nil {
-            if let (data, w, h) = imagePayload(png: pngData, tiff: pb.data(forType: .tiff)) {
-                let text = pb.string(forType: .string) ?? ""
-                let looksLikeImageCopy = text.isEmpty || text.count <= 256 || isHTML(text)
-                if looksLikeImageCopy {
-                    return .image(png: data, width: w, height: h)
-                }
+        // 2) 图片（是否"像图片复制"只看附带文本的长度，不解码位图）
+        let png = pb.data(forType: .png)
+        let tiff = pb.data(forType: .tiff)
+        if png != nil || tiff != nil {
+            let text = pb.string(forType: .string) ?? ""
+            let looksLikeImageCopy = text.isEmpty || text.count <= 256 || isHTML(text)
+            if looksLikeImageCopy {
+                return .image(png: png, tiff: tiff)
             }
         }
 
@@ -39,20 +39,26 @@ enum ClipboardReader {
             return .text(text)
         }
 
-        // 图片但被上面判定为文本的分支漏掉时兜底（长文本+图片并存→文本已在上面返回；纯图片走到这里）
-        if let (data, w, h) = imagePayload(png: pngData, tiff: pb.data(forType: .tiff)) {
-            return .image(png: data, width: w, height: h)
+        // 4) 兜底：长文本+图片并存时上面已按文本返回，走到这里的只剩纯图片
+        if png != nil || tiff != nil {
+            return .image(png: png, tiff: tiff)
         }
         return .none
     }
 
-    /// F3 贴图：仅取剪贴板当前图片（无文本分支干扰）
+    /// F3 贴图：剪贴板里「单个图片文件」的路径（访达里 ⌘C 复制的图片走的是文件 URL）
+    static func currentImageFileURL() -> URL? {
+        guard let urls = NSPasteboard.general.readObjects(forClasses: [NSURL.self],
+                                                          options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              urls.count == 1,
+              ImageFileTypes.isImage(path: urls[0].path) else { return nil }
+        return urls[0]
+    }
+
+    /// F3 贴图：剪贴板当前位图 → PNG（一次性转换，在调用线程完成）
     static func currentImagePNG() -> Data? {
         let pb = NSPasteboard.general
-        if let (data, _, _) = imagePayload(png: pb.data(forType: .png), tiff: pb.data(forType: .tiff)) {
-            return data
-        }
-        return nil
+        return ImageKit.canonicalImage(png: pb.data(forType: .png), tiff: pb.data(forType: .tiff))?.data
     }
 
     /// 来源 URL 提取（复制链接时浏览器会放 public.url；复制纯 URL 文本时从内容识别）。
@@ -82,29 +88,29 @@ enum ClipboardReader {
         let lower = s.lowercased()
         return lower.contains("<html") || lower.contains("img src") || lower.contains("<img")
     }
-
-    private static func imagePayload(png: Data?, tiff: Data?) -> (Data, Int, Int)? {
-        if let png {
-            if let size = ImageKit.pixelSize(of: png) {
-                return (png, size.width, size.height)
-            }
-        }
-        if let tiff, let rep = NSBitmapImageRep(data: tiff) {
-            if let out = rep.representation(using: .png, properties: [:]) {
-                return (out, rep.pixelsWide, rep.pixelsHigh)
-            }
-        }
-        return nil
-    }
 }
 
 /// 剪贴板写回（回填/截图复制/贴图复制）
+@MainActor
 enum ClipboardWriter {
+
+    /// 本进程最近一次写回后的 changeCount：监听器据此跳过自己造成的"伪变化"
+    /// （否则面板回填会被当成一次新复制，使用次数 +1、截图重复落盘）
+    private static var ownWriteChangeCount = -1
+
+    static func isOwnWrite(changeCount: Int) -> Bool {
+        changeCount == ownWriteChangeCount
+    }
+
+    private static func markOwnWrite() {
+        ownWriteChangeCount = NSPasteboard.general.changeCount
+    }
 
     static func writeText(_ text: String) {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
+        markOwnWrite()
     }
 
     static func writeImagePNG(_ png: Data) {
@@ -116,6 +122,7 @@ enum ClipboardWriter {
            let tiff = rep.tiffRepresentation {
             pb.setData(tiff, forType: .tiff)
         }
+        markOwnWrite()
     }
 
     static func writeFiles(_ paths: [String]) {
@@ -123,6 +130,7 @@ enum ClipboardWriter {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
+        markOwnWrite()
     }
 
     /// 历史条目回填剪贴板

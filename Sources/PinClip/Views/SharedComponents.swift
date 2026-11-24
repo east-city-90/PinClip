@@ -3,18 +3,6 @@ import AppKit
 
 // magpie 基础组件（色值/字重/圆角/阴影均按 magpie-ui-design-reference 实测令牌）
 
-/// 条目类型小图标（灰阶克制：ctlFg on pill）
-struct KindIcon: View {
-    let kind: ClipKind
-    var body: some View {
-        Image(systemName: Theme.kindSymbol(kind))
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-            .frame(width: 20, height: 20)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
-    }
-}
-
 /// 来源图标：App 图标 / favicon；无图时回退首字母徽标（accentSoft + accent）
 struct SourceIconView: View {
     let image: NSImage?
@@ -29,56 +17,13 @@ struct SourceIconView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 4))
         } else {
             ZStack {
-                Circle().fill(Color.accentColor.opacity(0.12))
+                Circle().fill(Theme.accentSoft)
                 Text((fallbackText ?? "?").prefix(1))
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.accent)
             }
             .frame(width: 16, height: 16)
         }
-    }
-}
-
-/// magpie 分段控件（界面标志性控件）：无轨道背景，仅选中项有白色浮块 + 发丝小阴影
-struct MagpieSegmented: View {
-    let options: [HistoryFilter]
-    let binding: Binding<HistoryFilter>
-
-    private var thumbFill: Color {
-        Color(nsColor: NSColor(name: nil) { ap in
-            ap.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                ? NSColor(white: 1, alpha: 0.15)
-                : NSColor.white
-        })
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(options, id: \.self) { opt in
-                let on = binding.wrappedValue == opt
-                Button {
-                    binding.wrappedValue = opt
-                } label: {
-                    Text(opt.label)
-                        .font(.system(size: 12.5))
-                        .padding(.horizontal, 12)
-                        .frame(height: 24)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(on ? Color.primary : Color(nsColor: .secondaryLabelColor))
-                .background(
-                    Group {
-                        if on {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(thumbFill)
-                                .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
-                                .shadow(color: .black.opacity(0.08), radius: 0.5)
-                        }
-                    }
-                )
-            }
-        }
-        .padding(2)
     }
 }
 
@@ -89,14 +34,12 @@ struct ToastView: View {
     var body: some View {
         Text(text)
             .font(.system(size: 12.5))
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background(
-                ZStack {
-                    Rectangle().fill(.ultraThinMaterial)
-                    Color.clear
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 11))
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 11))
             )
             .shadow(color: .black.opacity(0.16), radius: 22, y: 8)
             .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
@@ -104,12 +47,12 @@ struct ToastView: View {
     }
 }
 
-/// 置顶徽标（6px 强调色圆点样式语言）
+/// 置顶徽标（强调色图钉）
 struct PinBadge: View {
     var body: some View {
         Image(systemName: "pin.fill")
             .font(.system(size: 8))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(Theme.accent)
     }
 }
 
@@ -128,74 +71,16 @@ struct SectionHeader: View {
         }
         .font(.system(size: 11, weight: .semibold))
         .tracking(0.5)
-        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-        .padding(.horizontal, 14)
+        .foregroundStyle(Theme.muted)
+        .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// 图标文字钮（magpie text 按钮：静默灰字，悬停 pill 底）
-struct AppIconButton: View {
-    let systemName: String
-    var active = false
-    var helpText = ""
-    let action: () -> Void
+// MARK: - Liquid Glass 表面（macOS 26+ 系统液态玻璃；旧系统回退毛玻璃）
 
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 12))
-                .frame(width: 26, height: 26)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(active ? Color.accentColor : Color(nsColor: .secondaryLabelColor))
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(active ? Color.accentColor.opacity(0.12) : (hovering ? Color.primary.opacity(0.06) : Color.clear))
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .help(helpText)
-    }
-}
-
-// MARK: - 毛玻璃背景（underWindowBackground 模糊 + magpie pop 基底 tint）
-
-struct GlassBackground: View {
-    var tintOpacity: Double = 1.0
-
-    var body: some View {
-        ZStack {
-            NSVisualEffectViewWrapper()
-            Color.clear.opacity(tintOpacity)
-        }
-    }
-
-    static func layered() -> some View {
-        ZStack {
-            GlassBackground()
-            Color.clear
-        }
-    }
-}
-
-struct NSVisualEffectViewWrapper: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .underWindowBackground
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
-
-/// Liquid Glass 表面：macOS 26+ 用系统液态玻璃材质，旧系统回退毛玻璃
 extension View {
     @ViewBuilder
     func glassSurface<S: Shape>(in shape: S) -> some View {
@@ -204,12 +89,9 @@ extension View {
         } else {
             self
                 .background(
-                    ZStack {
-                        Rectangle().fill(.ultraThinMaterial)
-                        Color.clear.opacity(0.6)
-                    }
-                    .clipShape(shape)
+                    Rectangle().fill(.ultraThinMaterial)
                 )
+                .clipShape(shape)
         }
     }
 }
@@ -224,37 +106,13 @@ struct MetaLine: View {
         HStack(spacing: 4) {
             ForEach(texts.indices, id: \.self) { i in
                 if i > 0 {
-                    Text("·").foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    Text("·").foregroundStyle(Theme.faint)
                 }
                 Text(texts[i])
                     .lineLimit(1)
             }
         }
         .font(.system(size: 11))
-        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-    }
-}
-
-// MARK: - 系统面板材质（macOS 26+ Liquid Glass；旧系统回退 NSVisualEffectView 毛玻璃）
-
-struct SystemGlassModifier<S: Shape>: ViewModifier {
-    var shape: S
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.glassEffect(in: shape)
-        } else {
-            content
-                .background(
-                    Rectangle().fill(.ultraThinMaterial)
-                )
-                .clipShape(shape)
-        }
-    }
-}
-
-extension View {
-    func systemGlass<S: Shape>(in shape: S) -> some View {
-        modifier(SystemGlassModifier(shape: shape))
+        .foregroundStyle(Theme.muted)
     }
 }

@@ -120,6 +120,14 @@ enum Theme {
         return f.string(from: date)
     }
 
+    /// 列表时间：今天显示 HH:mm，非今天补日期（等宽数字由调用方加 monospacedDigit）
+    static func listTime(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) { return timeString(date) }
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f.string(from: date)
+    }
+
     static func fullString(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "MM-dd HH:mm"

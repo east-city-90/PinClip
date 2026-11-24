@@ -65,10 +65,16 @@ final class DisplayCaptureState {
     let bgPointSize: CGSize              // bg 在视图空间的 point 尺寸
     let snapWindows: [SnapWindow]        // 窗口吸附候选（全局左上原点 point）
     let isPrimaryInteraction: Bool       // 光标所在屏
+    /// 遮罩窗口 frame 覆盖（标注历史图片时窗口=图片大小，而非整屏；屏坐标系左下原点）
+    let frameOverride: CGRect?
 
     // 状态机
     var phase: Phase = .picking
     enum Phase { case picking, editing }
+
+    /// 放大镜：光标位置（遮罩根视图坐标）与该点颜色 hex（picking 态实时更新）
+    var cursorPoint: CGPoint?
+    var cursorColorHex: String?
 
     /// 编辑态拖拽模式（微信式：拖角调整大小 / 拖内部移动 / 拖外部重新框选）
     var editDrag: EditDrag?
@@ -101,13 +107,14 @@ final class DisplayCaptureState {
     var showBadge: Bool = false
 
     init(displayID: CGDirectDisplayID, screen: NSScreen, bgImage: CGImage, scale: CGFloat,
-         snapWindows: [SnapWindow], isPrimaryInteraction: Bool) {
+         snapWindows: [SnapWindow], isPrimaryInteraction: Bool, frameOverride: CGRect? = nil) {
         self.displayID = displayID
         self.screen = screen
         self.bgImage = bgImage
         self.scale = scale
         self.snapWindows = snapWindows
         self.isPrimaryInteraction = isPrimaryInteraction
+        self.frameOverride = frameOverride
         self.bgPointSize = CGSize(width: CGFloat(bgImage.width) / scale, height: CGFloat(bgImage.height) / scale)
         self.pixelatedImage = ImageKit.pixelated(bgImage)
     }
@@ -120,12 +127,21 @@ final class DisplayCaptureState {
         selection = CGRect(origin: point, size: .zero)
     }
 
-    func updateDrag(to point: CGPoint) {
+    func updateDrag(to point: CGPoint, square: Bool = false) {
         guard let start = dragStart else { return }
-        selection = CGRect(
+        var rect = CGRect(
             x: min(start.x, point.x), y: min(start.y, point.y),
             width: abs(point.x - start.x), height: abs(point.y - start.y)
         )
+        // 按住 ⇧：锁定正方形（沿拖拽方向展开）
+        if square {
+            let side = max(rect.width, rect.height)
+            let w = point.x >= start.x ? side : -side
+            let h = point.y >= start.y ? side : -side
+            rect = CGRect(x: min(start.x, start.x + w), y: min(start.y, start.y + h),
+                          width: side, height: side)
+        }
+        selection = rect
         // 实际拖动超过 4px 才清除吸附高亮（微动点击仍可采纳窗口 → 点击截全图）
         if let sel = selection, sel.width > 4, sel.height > 4 { hoverSnap = nil }
     }
@@ -265,10 +281,52 @@ final class DisplayCaptureState {
         return "\(Int((sel.width * scale).rounded()))×\(Int((sel.height * scale).rounded()))"
     }
 
+    // MARK: 工具条几何（定位与按下命中判定共用同一估算，避免两处漂移）
+
+    static let toolbarEstimatedSize = CGSize(width: 560, height: 44)
+
+    /// 工具条 frame（遮罩根视图坐标）：下方 → 上方 → 选区内底部 三级回退 + 水平钳制
+    func toolbarFrame(for sel: CGRect) -> CGRect {
+        let size = bgPointSize
+        let est = Self.toolbarEstimatedSize
+        let margin: CGFloat = 10
+        let gap: CGFloat = 14
+
+        var centerX = sel.midX
+        if size.width >= est.width + margin * 2 {
+            centerX = min(max(sel.midX, est.width / 2 + margin), size.width - est.width / 2 - margin)
+        } else {
+            centerX = size.width / 2
+        }
+
+        let fitsBelow = sel.maxY + gap + est.height <= size.height - margin
+        let fitsAbove = sel.minY - gap - est.height >= margin
+        var centerY: CGFloat
+        if fitsBelow {
+            centerY = sel.maxY + gap + est.height / 2
+        } else if fitsAbove {
+            centerY = sel.minY - gap - est.height / 2
+        } else {
+            // 两侧都放不下：悬浮在选区内底部（微信行为）
+            centerY = sel.maxY - est.height / 2 - 12
+        }
+        centerY = min(max(centerY, est.height / 2 + margin), size.height - est.height / 2 - margin)
+        return CGRect(x: centerX - est.width / 2, y: centerY - est.height / 2,
+                      width: est.width, height: est.height)
+    }
+
     // MARK: 导出（ImageRenderer 与实时视图共用同一渲染路径）
 
+    /// 失败返回 nil（调用方静默跳过曾导致"点击复制没截上"，故此处必须记录）
     func exportImage(action: CaptureAction) -> CGImage? {
-        guard let sel = selection else { return nil }
+        guard let sel = selection else {
+            NSLog("PinClip.capture: export 失败 selection=nil")
+            return nil
+        }
+        guard sel.width >= 2, sel.height >= 2 else {
+            NSLog("PinClip.capture: export 失败 选区过小 \(sel.size)")
+            return nil
+        }
         let content = CaptureContentView(
             bg: bgImage,
             pixelated: pixelatedImage,
@@ -282,7 +340,13 @@ final class DisplayCaptureState {
         let renderer = ImageRenderer(content: content)
         renderer.scale = scale
         renderer.proposedSize = ProposedViewSize(sel.size)
-        return renderer.cgImage
+        let cg = renderer.cgImage
+        if let cg {
+            NSLog("PinClip.capture: export OK \(cg.width)×\(cg.height)")
+        } else {
+            NSLog("PinClip.capture: export renderer.cgImage=nil（内存或尺寸异常）")
+        }
+        return cg
     }
 
     /// 导出选区的全局左上坐标（point，供元数据/保存命名用）

@@ -78,20 +78,6 @@ final class Database {
         guard rc == SQLITE_OK else { throw StoreError.execFailed(rc, message ?? sql) }
     }
 
-    /// 写入事务包装
-    func transaction(_ body: () throws -> Void) throws {
-        try queue.sync {
-            try exec("BEGIN IMMEDIATE;")
-            do {
-                try body()
-                try exec("COMMIT;")
-            } catch {
-                try? exec("ROLLBACK;")
-                throw error
-            }
-        }
-    }
-
     // MARK: 查询
 
     /// 通用查询；row 回调按列序读取
