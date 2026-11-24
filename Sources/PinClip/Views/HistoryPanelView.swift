@@ -625,31 +625,34 @@ struct DetailPane: View {
 
     private func footer(for item: ClipItem) -> some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                detailButton("粘贴", symbol: "rectangle.on.rectangle") {
-                    pasteDisplayed(item)
-                }
-                detailButton("复制", symbol: "doc.on.doc") {
-                    copyDisplayed(item)
-                }
-                if item.kind == .text {
-                    detailButton("纯文本", symbol: "text.justify") {
-                        actions.copyPlain(item)
+            // 主按钮组流式换行；删除固定右缘（窄面板主按钮折行时仍贴右）
+            HStack(alignment: .center, spacing: 6) {
+                FlowLayout(spacing: 6) {
+                    detailButton("粘贴", symbol: "rectangle.on.rectangle") {
+                        pasteDisplayed(item)
                     }
-                }
-                detailButton(item.pinned ? "取消置顶" : "置顶", symbol: "pin") {
-                    actions.togglePin(item)
-                }
-                if item.isVisual {
-                    detailButton("贴图", symbol: "pin.fill") {
-                        _ = actions.pinToScreen(item)
+                    detailButton("复制", symbol: "doc.on.doc") {
+                        copyDisplayed(item)
                     }
-                    detailButton("标注", symbol: "pencil.and.outline") {
-                        actions.annotate(item)
+                    if item.kind == .text {
+                        detailButton("纯文本", symbol: "text.justify") {
+                            actions.copyPlain(item)
+                        }
                     }
-                    if let path = item.displayImagePath {
-                        detailButton("访达", symbol: "folder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    detailButton(item.pinned ? "取消置顶" : "置顶", symbol: "pin") {
+                        actions.togglePin(item)
+                    }
+                    if item.isVisual {
+                        detailButton("贴图", symbol: "pin.fill") {
+                            _ = actions.pinToScreen(item)
+                        }
+                        detailButton("标注", symbol: "pencil.and.outline") {
+                            actions.annotate(item)
+                        }
+                        if let path = item.displayImagePath {
+                            detailButton("访达", symbol: "folder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                            }
                         }
                     }
                 }
@@ -760,64 +763,61 @@ struct DetailPane: View {
         }
     }
 
-    /// 文本工具行（按钮固定理想宽度；超宽时横向滚动兜底）
+    /// 文本工具行：流式布局自动换行（此前横向滚动 + 无滚动条，末尾按钮被裁切且无任何可滚提示）
     private func toolRow(for item: ClipItem) -> some View {
         let hints = Self.hintKeys(for: item.textContent ?? "")
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Self.tools, id: \.key) { tool in
-                    let applied = vm.detailTransformKey == tool.key
-                    let hinted = hints.contains(tool.key) && !applied
-                    Button {
-                        applyTransform(tool.key, item)
-                    } label: {
-                        Text(tool.title)
-                            .font(.system(size: 11, weight: applied ? .semibold : .regular))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .fixedSize()
-                            .overlay(alignment: .topTrailing) {
-                                if hinted {
-                                    Circle()
-                                        .fill(Theme.accent)
-                                        .frame(width: 5, height: 5)
-                                        .offset(x: 2, y: -1)
-                                }
+        return FlowLayout(spacing: 6) {
+            ForEach(Self.tools, id: \.key) { tool in
+                let applied = vm.detailTransformKey == tool.key
+                let hinted = hints.contains(tool.key) && !applied
+                Button {
+                    applyTransform(tool.key, item)
+                } label: {
+                    Text(tool.title)
+                        .font(.system(size: 11, weight: applied ? .semibold : .regular))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .fixedSize()
+                        .overlay(alignment: .topTrailing) {
+                            if hinted {
+                                Circle()
+                                    .fill(Theme.accent)
+                                    .frame(width: 5, height: 5)
+                                    .offset(x: 2, y: -1)
                             }
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(applied ? Theme.accent : Theme.fg2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(applied ? Theme.accentSoft : Theme.card)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(applied ? Color.clear : Theme.line, lineWidth: 0.5)
-                    )
-                    .help(hinted ? "内容看起来适合此工具" : tool.title)
+                        }
                 }
-                if vm.detailTransformed != nil {
-                    Button {
-                        vm.detailTransformed = nil
-                        vm.detailTransformKey = nil
-                    } label: {
-                        Text("还原")
-                            .font(.system(size: 11))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .fixedSize()
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.ctlFg)
-                    .background(Theme.pill, in: RoundedRectangle(cornerRadius: 6))
+                .buttonStyle(.plain)
+                .foregroundStyle(applied ? Theme.accent : Theme.fg2)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(applied ? Theme.accentSoft : Theme.card)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(applied ? Color.clear : Theme.line, lineWidth: 0.5)
+                )
+                .help(hinted ? "内容看起来适合此工具" : tool.title)
+            }
+            if vm.detailTransformed != nil {
+                Button {
+                    vm.detailTransformed = nil
+                    vm.detailTransformKey = nil
+                } label: {
+                    Text("还原")
+                        .font(.system(size: 11))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .fixedSize()
                 }
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.ctlFg)
+                .background(Theme.pill, in: RoundedRectangle(cornerRadius: 6))
             }
         }
-        .scrollIndicators(.never)
         .padding(.horizontal, 12)
         .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     private struct TextTool {
@@ -1035,6 +1035,43 @@ private extension Text {
     func keyStyle() -> some View {
         font(.system(size: 10.5))
             .foregroundStyle(Theme.muted)
+    }
+}
+
+/// 流式布局：子视图放不下自动折行（工具行/详情按钮组用，替代会被裁切的横向滚动）
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxW {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        let width = maxW.isFinite ? maxW : max(x - spacing, 0)
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: .unspecified)
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
 

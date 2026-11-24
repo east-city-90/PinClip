@@ -245,6 +245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (suffix, appearance, scheme) in
             [("light", NSAppearance.Name.aqua, ColorScheme.light),
              ("dark", NSAppearance.Name.darkAqua, ColorScheme.dark)] {
+            // 渲染前选中第一条文本条目：工具行只对文本详情出现（自检其换行布局）
+            panelController.panelVM.selectedID =
+                panelController.panelVM.items.first(where: { $0.kind == .text })?.id
+                ?? panelController.panelVM.selectedID
             render("panel-\(suffix)", appearance: appearance, colorScheme: scheme, width: 720, height: 560) {
                 NSHostingView(rootView: PanelRootView(
                     appState: appState,
