@@ -36,6 +36,8 @@ final class OverlayController {
         guard !isRunning else { return }
         isRunning = true
         finished = false
+        // 延时倒计时未结束就触发新截图（⌥A/托盘）时，先移除仍在屏上的 HUD，避免它被截进冻结帧
+        closeHUD()
 
         let settings = appState?.settings ?? AppSettings()
         let snaps = SnapWindows.list(excludingPID: ProcessInfo.processInfo.processIdentifier)
@@ -94,8 +96,15 @@ final class OverlayController {
         hud.contentView = NSHostingView(rootView: DelayHUDView(
             seconds: max(1, seconds),
             onFinish: { [weak self] in
-                self?.closeHUD()
-                Task { await self?.beginRegionCapture() }
+                guard let self else { return }
+                let hud = self.hudPanel
+                self.closeHUD()
+                // orderOut 是异步的：立即截屏会把还在窗口服务器合成树里的 HUD 截进冻结帧
+                // （实测：成品图中央残留"1 秒后开始截图"弹窗）。等窗口真正离屏再开始截屏。
+                Task { [weak self] in
+                    await self?.waitForScreenRemoval(hud)
+                    await self?.beginRegionCapture()
+                }
             },
             onCancel: { [weak self] in
                 self?.closeHUD()
@@ -108,6 +117,19 @@ final class OverlayController {
     private func closeHUD() {
         hudPanel?.orderOut(nil)
         hudPanel = nil
+    }
+
+    /// 轮询等待窗口从窗口服务器移除（windowNumber == -1 即不在屏），
+    /// 再留一帧合成缓冲；兜底上限 ~1.2s，绝不阻塞正常流程。
+    private func waitForScreenRemoval(_ panel: NSPanel?) async {
+        guard let panel else { return }
+        for _ in 0..<40 {
+            if panel.windowNumber == -1 {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
     }
 
     /// 历史图片 → 重新标注：窗口=图片大小（居中光标屏），选区铺满，直接进编辑态
