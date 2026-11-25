@@ -15,6 +15,8 @@ enum UpdateChecker {
     struct Release {
         let tag: String
         let url: URL
+        /// zip 资产直链（releases/latest 的 assets 里取）
+        let downloadURL: URL?
     }
 
     static func latest() async -> Release? {
@@ -26,7 +28,15 @@ enum UpdateChecker {
               let tag = obj["tag_name"] as? String
         else { return nil }
         let urlStr = (obj["html_url"] as? String) ?? releasesURL.absoluteString
-        return Release(tag: tag, url: URL(string: urlStr) ?? releasesURL)
+        let downloadURL = ((obj["assets"] as? [[String: Any]]) ?? [])
+            .compactMap { asset -> URL? in
+                guard let name = asset["name"] as? String, name.hasSuffix(".zip"),
+                      let link = asset["browser_download_url"] as? String
+                else { return nil }
+                return URL(string: link)
+            }
+            .first
+        return Release(tag: tag, url: URL(string: urlStr) ?? releasesURL, downloadURL: downloadURL)
     }
 
     /// 数值版本比较（忽略前缀 v；段数不同按 0 补齐）
@@ -42,17 +52,42 @@ enum UpdateChecker {
         return false
     }
 
-    /// 手动「检查更新」：结果无论新旧都 toast 告知；发现新版则打开发布页
+    /// 手动「检查更新」：发现新版 → 直接下载安装包到「下载」并在访达中定位（不打开网页）
     static func checkManual(appState: AppState) async {
         guard let release = await latest() else {
             appState.showToast("检查更新失败（网络不可用？）")
             return
         }
         if isNewer(release.tag, than: currentVersion()) {
-            appState.showToast("新版本 \(release.tag) 可用，已打开发布页")
-            NSWorkspace.shared.open(release.url)
+            await downloadAndReveal(release, appState: appState)
         } else {
             appState.showToast("已是最新版本 v\(currentVersion())")
+        }
+    }
+
+    /// 下载 release 的 zip 到「下载」文件夹，完成后在访达中显示
+    static func downloadAndReveal(_ release: Release, appState: AppState) async {
+        guard let downloadURL = release.downloadURL else {
+            // Release 没挂 zip 资产（异常情况）：回退打开发布页
+            appState.showToast("新版本 \(release.tag) 发布页")
+            NSWorkspace.shared.open(release.url)
+            return
+        }
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let dest = downloads.appendingPathComponent("PinClip-\(release.tag).zip")
+        appState.showToast("正在下载 \(release.tag) …")
+        do {
+            let (tmpURL, response) = try await URLSession.shared.download(from: downloadURL)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                throw URLError(.badServerResponse)
+            }
+            try? FileManager.default.removeItem(at: dest) // 同名覆盖
+            try FileManager.default.moveItem(at: tmpURL, to: dest)
+            NSWorkspace.shared.activateFileViewerSelecting([dest])
+            appState.showToast("已下载 \(release.tag) · 解压后拖入「应用程序」即完成更新")
+        } catch {
+            appState.showToast("下载失败：\(error.localizedDescription)")
         }
     }
 
